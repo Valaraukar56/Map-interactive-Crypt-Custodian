@@ -4,6 +4,9 @@ tiles/
 # JPG original (doublon de map.jpg, nom avec espaces/parens problématique)
 JPG50_*.jpg
 
+# Ancienne map JPG haute-res (remplacée par s_map.png extrait du data.win)
+map.jpg
+
 # exports JSON datés (sauvegardes utilisateur)
 crypt-custodian-map-*.json
 

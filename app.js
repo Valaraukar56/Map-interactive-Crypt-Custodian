@@ -8,7 +8,9 @@
 const USE_TILES = window.CC_DATA && window.CC_DATA.USE_TILES === true;
 
 const STORAGE_KEY = 'cc-map-state-v1';
-const SCHEMA_VERSION = 1;
+// v2 : passage du JPG (21140x7540) au sprite officiel s_map.png (2580x880).
+// Les anciennes coords ne sont plus compatibles, on reset le state au passage.
+const SCHEMA_VERSION = 2;
 
 /* ---------- State ---------- */
 const state = loadState() || {
@@ -54,11 +56,11 @@ function toast(msg, ms = 1800) {
 const bounds = [[0, 0], [MAP_HEIGHT, MAP_WIDTH]];
 const map = L.map('map', {
   crs: L.CRS.Simple,
-  minZoom: -5,
-  maxZoom: 3,
+  minZoom: -2,
+  maxZoom: 5,
   zoomSnap: 0.25,
   zoomDelta: 0.5,
-  wheelPxPerZoomLevel: 100,
+  wheelPxPerZoomLevel: 120,
   attributionControl: false,
   zoomControl: true,
   preferCanvas: true

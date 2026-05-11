@@ -1,14 +1,14 @@
 /* ============================================================
    Crypt Custodian — données de la map interactive
    ============================================================
+   Base map : s_map.png (sprite officiel extrait du data.win, 2580x880).
    Catégories : config (icône, couleur, total attendu pour 100%)
-   Markers   : liste éditable. Position en [y, x] (Leaflet CRS.Simple)
-   La map fait 21140 (largeur) x 7540 (hauteur).
+   Markers : positions en coords s_map (pixels natifs).
    ============================================================ */
 
-const MAP_WIDTH = 21140;
-const MAP_HEIGHT = 7540;
-const MAP_IMAGE = 'map.jpg';
+const MAP_WIDTH = 2580;
+const MAP_HEIGHT = 880;
+const MAP_IMAGE = 's_map.png';
 
 const CATEGORIES = {
   picture:       { name: 'Pictures (photos)',      icon: '📷', color: '#fbbf24', total: 33 },
@@ -69,19 +69,9 @@ const KNOWN_NAMES = {
    L'utilisateur ajoutera le reste via le mode édition.
    Positions [y, x] où y=0 est en bas, y=MAP_HEIGHT en haut.
    ------------------------------------------------------------ */
-/* Étiquettes de zones placées en rangée au milieu — à déplacer
-   sur les vraies zones via le mode édition (clic + drag dans le popup,
-   ou supprime et replace). Permet d'avoir des repères pour démarrer. */
-const INITIAL_MARKERS = [
-  { id: 'area-palace',  category: 'area', name: 'The Palace',          y: 3770, x: 1500,  notes: 'Zone de départ' },
-  { id: 'area-pearl',   category: 'area', name: "Pearl's Shrine",      y: 3770, x: 4000,  notes: '' },
-  { id: 'area-weeping', category: 'area', name: 'Weeping Wastes',      y: 3770, x: 6500,  notes: '' },
-  { id: 'area-sinner',  category: 'area', name: "Sinner's Inn",        y: 3770, x: 9000,  notes: 'Hub / Mira / Jukebox' },
-  { id: 'area-tower',   category: 'area', name: 'The Tower',           y: 3770, x: 11500, notes: '' },
-  { id: 'area-sculpt',  category: 'area', name: "Sculptor's Peak",     y: 3770, x: 14000, notes: '' },
-  { id: 'area-neon',    category: 'area', name: 'Neon Crest',          y: 3770, x: 16500, notes: '' },
-  { id: 'area-frosty',  category: 'area', name: 'Frosty Ridge',        y: 3770, x: 19000, notes: '' }
-];
+/* Pas de markers initiaux : on les placera via le pipeline data.win
+   (Room Mapper Tool → import auto depuis crypt_custodian_export.json). */
+const INITIAL_MARKERS = [];
 
 /* helpers exposés */
 window.CC_DATA = { MAP_WIDTH, MAP_HEIGHT, MAP_IMAGE, CATEGORIES, KNOWN_NAMES, INITIAL_MARKERS };

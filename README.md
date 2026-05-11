@@ -2,7 +2,7 @@
 
 App web pour tracker la complétion 100% du jeu **Crypt Custodian** sur la map officielle.
 
-![Crypt Custodian Map](map.jpg)
+![Crypt Custodian Map](s_map.png)
 
 ## Lancement rapide
 
