@@ -12,6 +12,9 @@ save_sample.sav
 save_parsed.json
 progress_report.json
 
+# Editeur de save (perso seulement, pas à publier sur le repo)
+edit_save.py
+
 # exports JSON datés (sauvegardes utilisateur)
 crypt-custodian-map-*.json
 
