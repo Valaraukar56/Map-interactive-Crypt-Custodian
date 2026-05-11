@@ -167,12 +167,6 @@
       "sprite": ""
     },
     {
-      "smap_xpos": 95.75,
-      "smap_ypos": 44,
-      "source": "visible",
-      "sprite": "s_star"
-    },
-    {
       "smap_xpos": 90.5,
       "smap_ypos": 36.5,
       "source": "visible",
@@ -679,46 +673,6 @@
       "sprite": "",
       "game_x": 1985,
       "game_y": 425
-    }
-  ],
-  "AM_41": [
-    {
-      "smap_xpos": 19,
-      "smap_ypos": 51,
-      "source": "visible",
-      "sprite": "s_star"
-    }
-  ],
-  "AS_6": [
-    {
-      "smap_xpos": 46.5,
-      "smap_ypos": 44,
-      "source": "visible",
-      "sprite": "s_star"
-    }
-  ],
-  "AM_38": [
-    {
-      "smap_xpos": 3.5,
-      "smap_ypos": 42,
-      "source": "visible",
-      "sprite": "s_star"
-    }
-  ],
-  "AO_23": [
-    {
-      "smap_xpos": 75.5,
-      "smap_ypos": 18.5,
-      "source": "visible",
-      "sprite": "s_star"
-    }
-  ],
-  "AN_1": [
-    {
-      "smap_xpos": 20,
-      "smap_ypos": 4.5,
-      "source": "visible",
-      "sprite": "s_star"
     }
   ]
 }

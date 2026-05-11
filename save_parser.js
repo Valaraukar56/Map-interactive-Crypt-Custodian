@@ -226,6 +226,9 @@
       try {
         const j = JSON.parse(jsonStr);
         if (!j._room) return;
+        // SKIP les stars placées par l'utilisateur (peuvent être n'importe où)
+        const sprite = (j._sprite_zoom || '').toLowerCase();
+        if (sprite.includes('star')) return;
         (anchors[j._room] = anchors[j._room] || []).push({
           smap_xpos: j._xpos,
           smap_ypos: j._ypos,
@@ -326,14 +329,14 @@
           smapY = exactMatch.smap_ypos;
           exact = true;
         } else {
-          // Cluster autour du centre de la room, avec petit décalage radial
-          // pour ne pas superposer les items multiples
+          // Cluster autour du centre de la room. Décalage radial TRÈS petit
+          // (une room sur la s_map fait ~1-2 units, on reste largement dedans).
           smapX = centerSmapX;
           smapY = centerSmapY;
           if (itemsInRoom.length > 1) {
             const angle = (i / itemsInRoom.length) * Math.PI * 2;
-            smapX += Math.cos(angle) * 0.6;
-            smapY += Math.sin(angle) * 0.4;
+            smapX += Math.cos(angle) * 0.15;
+            smapY += Math.sin(angle) * 0.10;
           }
           exact = false;
         }
