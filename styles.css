@@ -161,6 +161,27 @@ body {
   border-color: var(--danger);
 }
 
+.toolbar a {
+  flex: 1;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: center;
+  text-decoration: none;
+  transition: all 0.15s;
+  display: inline-block;
+}
+
+.toolbar a:hover {
+  background: var(--accent-2);
+  border-color: var(--accent);
+  color: white;
+}
+
 .admin-panel {
   margin: 8px 14px;
   padding: 10px;
