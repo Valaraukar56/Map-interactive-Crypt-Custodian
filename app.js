@@ -440,6 +440,131 @@ document.getElementById('import-file').addEventListener('change', async (e) => {
 
 document.getElementById('search').addEventListener('input', () => renderMarkers());
 
+/* ====================================================================
+   IMPORT SAVE — charge un .sav Crypt Custodian, parse et affiche
+   un rapport de progression 100% dans le panneau dédié.
+   ==================================================================== */
+const SAVE_REPORT_KEY = 'cc-save-report-v1';
+
+document.getElementById('save-import-btn').addEventListener('click', () => {
+  document.getElementById('save-file-input').click();
+});
+
+document.getElementById('save-file-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const buf = await file.arrayBuffer();
+    const report = await window.CC_SAVE.parseSaveFile(buf);
+    localStorage.setItem(SAVE_REPORT_KEY, JSON.stringify(report));
+    renderSaveReport(report);
+    toast(`Save chargée — ${file.name}`);
+  } catch (err) {
+    alert('Erreur de parsing du .sav : ' + err.message);
+    console.error(err);
+  }
+  e.target.value = '';
+});
+
+function renderSaveReport(report) {
+  const panel = document.getElementById('save-progress-panel');
+  if (!report) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+
+  const cats = report.categories;
+  // Total et pourcentage global (basé sur les catégories trackables)
+  const trackable = ['pictures', 'upgrades', 'abilities', 'curses', 'spirits', 'jukebox'];
+  let found = 0, total = 0;
+  for (const c of trackable) {
+    found += cats[c].found;
+    total += cats[c].total;
+  }
+  const pctGlobal = total > 0 ? Math.round((found / total) * 100) : 0;
+
+  const catEntries = [
+    { key: 'pictures',  icon: '📷', name: 'Pictures',         color: '#fbbf24' },
+    { key: 'upgrades',  icon: '⚡', name: 'Upgrades',         color: '#f97316' },
+    { key: 'abilities', icon: '🦘', name: 'Abilities',        color: '#3b82f6' },
+    { key: 'curses',    icon: '💀', name: 'Curses beaten',    color: '#ef4444' },
+    { key: 'spirits',   icon: '👻', name: 'Trapped Spirits',  color: '#22d3ee' },
+    { key: 'jukebox',   icon: '💿', name: 'Jukebox songs',    color: '#a855f7' }
+  ];
+
+  panel.innerHTML = `
+    <div class="sr-head">
+      <div class="sr-title">📥 Save loaded</div>
+      <button class="sr-clear" title="Effacer le rapport">×</button>
+    </div>
+    <div class="sr-global">
+      <div class="sr-global-bar"><div class="sr-global-fill" style="width:${pctGlobal}%"></div></div>
+      <div class="sr-global-pct">${pctGlobal}%</div>
+      <div class="sr-global-detail">${found} / ${total} (sur les catégories trackables)</div>
+    </div>
+
+    <ul class="sr-cats">
+      ${catEntries.map(ce => {
+        const c = cats[ce.key];
+        const pct = c.total > 0 ? Math.round(c.found / c.total * 100) : 0;
+        const remaining = c.total - c.found;
+        const done = remaining <= 0;
+        return `
+          <li class="sr-cat ${done ? 'done' : 'pending'}">
+            <div class="sr-cat-row">
+              <span class="sr-cat-icon" style="background:${ce.color}">${ce.icon}</span>
+              <span class="sr-cat-name">${ce.name}</span>
+              <span class="sr-cat-count">${c.found}/${c.total}</span>
+              <span class="sr-cat-status">${done ? '✓' : `manque ${remaining}`}</span>
+            </div>
+            <div class="sr-cat-bar"><div class="sr-cat-fill" style="width:${pct}%; background:${ce.color}"></div></div>
+          </li>
+        `;
+      }).join('')}
+    </ul>
+
+    <details class="sr-details">
+      <summary>🎵 Musiques débloquées (${cats.jukebox.songs.length})</summary>
+      <ul class="sr-songs">${cats.jukebox.songs.map(s => `<li>${s}</li>`).join('')}</ul>
+    </details>
+
+    <details class="sr-details">
+      <summary>📊 Stats de ton run</summary>
+      <table class="sr-stats">
+        <tr><td>Ennemis tués</td><td>${report.stats.enemies_killed.toLocaleString()}</td></tr>
+        <tr><td>Coups portés</td><td>${report.stats.attacks_swung.toLocaleString()}</td></tr>
+        <tr><td>Specials utilisés</td><td>${report.stats.specials_used}</td></tr>
+        <tr><td>Attack strength</td><td>${report.stats.attack_strength}</td></tr>
+        <tr><td>Health max</td><td>${report.stats.player_health_max}</td></tr>
+        <tr><td>Slots upgrade</td><td>${report.stats.bought_slots}</td></tr>
+        <tr><td>Room actuelle</td><td>${report.stats.current_room}</td></tr>
+        <tr><td>Difficulté</td><td>${report.stats.difficulty}</td></tr>
+      </table>
+    </details>
+
+    ${report.teleporters.length > 0 ? `
+    <details class="sr-details">
+      <summary>🚪 Téléporteurs débloqués (${report.teleporters.length})</summary>
+      <ul class="sr-tele">${report.teleporters
+        .sort((a, b) => (a._room || '').localeCompare(b._room || ''))
+        .map(t => `<li><code>${t._room}</code> · map(${t._xpos}, ${t._ypos})</li>`).join('')}</ul>
+    </details>` : ''}
+  `;
+
+  panel.querySelector('.sr-clear').addEventListener('click', () => {
+    if (!confirm('Effacer le rapport de save ?')) return;
+    localStorage.removeItem(SAVE_REPORT_KEY);
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
+  });
+}
+
+// Restaure le rapport sauvegardé au chargement
+(function restoreReport() {
+  try {
+    const raw = localStorage.getItem(SAVE_REPORT_KEY);
+    if (raw) renderSaveReport(JSON.parse(raw));
+  } catch (e) { /* ignore */ }
+})();
+
 /* ---------- Admin panel ---------- */
 const adminSelect = document.getElementById('admin-category');
 adminSelect.innerHTML = Object.entries(CATEGORIES)

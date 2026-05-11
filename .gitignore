@@ -7,6 +7,11 @@ JPG50_*.jpg
 # Ancienne map JPG haute-res (remplacée par s_map.png extrait du data.win)
 map.jpg
 
+# Saves utilisateur et analyses dérivées (perso, pas à publier)
+save_sample.sav
+save_parsed.json
+progress_report.json
+
 # exports JSON datés (sauvegardes utilisateur)
 crypt-custodian-map-*.json
 
@@ -22,3 +27,4 @@ Thumbs.db
 # Python
 __pycache__/
 *.pyc
+save_analysis.txt

@@ -37,6 +37,13 @@
     </div>
 
     <div class="toolbar">
+      <button id="save-import-btn" title="Charge ta save .sav pour voir ta progression exacte">📥 Import Save (.sav)</button>
+    </div>
+    <input type="file" id="save-file-input" accept=".sav" hidden />
+
+    <div id="save-progress-panel" class="save-progress hidden"></div>
+
+    <div class="toolbar">
       <button id="export-btn" title="Exporter les marqueurs en JSON">⬇ Export</button>
       <button id="import-btn" title="Importer un JSON">⬆ Import</button>
       <button id="reset-btn" class="danger" title="Effacer toute la progression sauvegardée">🗑 Reset</button>
@@ -64,6 +71,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="data.js"></script>
+  <script src="save_parser.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
