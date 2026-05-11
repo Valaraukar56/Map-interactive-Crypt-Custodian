@@ -527,14 +527,22 @@ function floodFillBounds(pd, sx, sy) {
 
   const sIdx = (sy * width + sx) * 4;
   const r0 = data[sIdx], g0 = data[sIdx + 1], b0 = data[sIdx + 2];
-  if (isBorder(r0, g0, b0) || isBackground(r0, g0, b0)) return null;
+  if (isHardBorder(r0, g0, b0) || isBackground(r0, g0, b0)) return null;
 
+  const sumOrig = r0 + g0 + b0;
   const visited = new Uint8Array(width * height);
   const stack = [sx, sy];
   let minX = sx, maxX = sx, minY = sy, maxY = sy;
   let sumR = 0, sumG = 0, sumB = 0, n = 0;
-  const MAX_DIST = 70;
-  const MAX_PIXELS = 30000;  // safety
+
+  // Seuils très stricts pour éviter de baver dans les rooms voisines
+  // de la même zone (qui ont quasi la même couleur, séparées seulement
+  // par des bordures blanches fines + anti-aliasing).
+  const MAX_DIST = 20;          // diff couleur absolue très tight
+  const BRIGHTER_DELTA = 60;    // si pixel beaucoup + brillant que l'origine → bordure
+  const MAX_PIXELS = 8000;      // ~90x90 px max, une room normale fait 20-80px
+  const HARD_W = Math.floor(width / 3);    // si rect plus large que ça → on rejette
+  const HARD_H = Math.floor(height / 3);
 
   while (stack.length > 0 && n < MAX_PIXELS) {
     const y = stack.pop();
@@ -545,7 +553,12 @@ function floodFillBounds(pd, sx, sy) {
     visited[i] = 1;
     const pi = i * 4;
     const r = data[pi], g = data[pi + 1], b = data[pi + 2];
-    if (isBorder(r, g, b) || isBackground(r, g, b)) continue;
+
+    if (isHardBorder(r, g, b)) continue;
+    if (isBackground(r, g, b)) continue;
+    // bordure relative : pixel notablement plus brillant que l'origine
+    if ((r + g + b) - sumOrig > BRIGHTER_DELTA * 3) continue;
+    // distance couleur absolue
     if (colorDist(r, g, b, r0, g0, b0) > MAX_DIST) continue;
 
     if (x < minX) minX = x;
@@ -561,24 +574,27 @@ function floodFillBounds(pd, sx, sy) {
   }
 
   if (n < 8) return null;
+  const w = maxX - minX + 1, h = maxY - minY + 1;
+  if (w > HARD_W || h > HARD_H) {
+    console.warn(`[floodfill] rectangle ${w}x${h} trop grand (limites ${HARD_W}x${HARD_H}), rejeté`);
+    return null;
+  }
   return {
-    x: minX, y: minY,
-    w: maxX - minX + 1, h: maxY - minY + 1,
+    x: minX, y: minY, w, h,
     color: { r: Math.round(sumR / n), g: Math.round(sumG / n), b: Math.round(sumB / n) },
     pixelCount: n
   };
 }
 
-function isBorder(r, g, b) {
-  // Bordures blanches entre les rooms (et le tour de chaque room)
-  return r > 200 && g > 200 && b > 200;
+function isHardBorder(r, g, b) {
+  // Pixel très clair (presque blanc) = bordure pure entre rooms.
+  // Seuil bas pour catch les pixels anti-aliasés des bordures.
+  return r > 170 && g > 170 && b > 170;
 }
 function isBackground(r, g, b) {
-  // Background gris-très-sombre entre les zones colorées
-  if (r < 60 && g < 60 && b < 60) return true;
-  // Gris uniforme (R≈G≈B avec saturation faible)
+  if (r < 50 && g < 50 && b < 50) return true;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  if (max < 120 && (max - min) < 15) return true;
+  if (max < 110 && (max - min) < 12) return true;
   return false;
 }
 function colorDist(r1, g1, b1, r2, g2, b2) {
@@ -1001,6 +1017,21 @@ document.getElementById('mapper-toggle').addEventListener('click', () => {
 document.getElementById('mapper-search').addEventListener('input', (e) => {
   mapperUI.search = e.target.value;
   renderMapperList();
+});
+
+document.getElementById('mapper-clear-all').addEventListener('click', () => {
+  const n = Object.keys(state.roomMappings).length;
+  if (n === 0) { toast('Aucune room mappée'); return; }
+  if (!confirm(`Effacer les ${n} mapping(s) de rooms et tous leurs items auto-placés ?`)) return;
+  state.roomMappings = {};
+  state.zoneColors = {};
+  state.markers = state.markers.filter(m => !(m.id && m.id.startsWith('dm_')));
+  saveState();
+  renderMarkers();
+  renderSidebar();
+  renderRoomRects();
+  renderMapperList();
+  toast(`${n} mapping(s) effacé(s)`);
 });
 
 window.addEventListener('keydown', (e) => {

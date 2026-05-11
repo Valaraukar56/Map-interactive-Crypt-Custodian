@@ -52,15 +52,13 @@
     </div>
 
     <div id="mapper-panel" class="admin-panel hidden">
-      <p class="hint" id="mapper-hint">
-        <strong>🗺️ Room Mapper.</strong><br />
-        Sélectionne une room ci-dessous, puis clique <strong>2 fois sur la map</strong>
-        (coin haut-gauche puis coin bas-droit) pour la délimiter.<br />
-        Tous les items dedans seront placés automatiquement à leur position relative.
-      </p>
+      <p class="hint" id="mapper-hint">…</p>
       <input id="mapper-search" type="search" placeholder="Filtrer rooms…" style="margin:6px 0;width:100%;padding:6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;" />
       <div id="mapper-status" style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">…</div>
       <ul id="mapper-room-list" class="mapper-room-list"></ul>
+      <div style="display:flex;gap:4px;margin-top:6px;">
+        <button id="mapper-clear-all" class="danger" style="flex:1;background:var(--bg-elev-2);border:1px solid var(--danger);color:var(--danger);padding:5px;border-radius:4px;cursor:pointer;font-size:11px;">🗑 Reset tous les mappings</button>
+      </div>
     </div>
 
     <h2 class="cat-header">Catégories</h2>
