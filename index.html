@@ -38,6 +38,7 @@
 
     <div class="toolbar">
       <button id="save-import-btn" title="Charge ta save .sav pour voir ta progression exacte">📥 Import Save (.sav)</button>
+      <button id="save-tuto-btn" title="Où trouver mon fichier .sav ?">❓ Tuto .sav</button>
     </div>
     <input type="file" id="save-file-input" accept=".sav" hidden />
 
@@ -72,6 +73,67 @@
   <main id="map"></main>
 
   <div id="toast" class="toast hidden"></div>
+
+  <div id="save-tuto-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>❓ Où trouver mon fichier .sav ?</h2>
+        <button class="modal-close" id="save-tuto-close">×</button>
+      </div>
+      <div class="modal-body">
+        <p>Le jeu sauvegarde ta progression dans un fichier <code>CryptCustodian1.sav</code> (ou <code>2</code>, <code>3</code> selon ton slot de save). Voici où il se trouve selon ton OS :</p>
+
+        <div class="tuto-block">
+          <h3>🪟 Windows</h3>
+          <p>Ouvre l'<strong>Explorateur de fichiers</strong>, copie-colle dans la barre d'adresse :</p>
+          <div class="path-copy">
+            <code>%LOCALAPPDATA%\CryptCustodian\CRYPTCUSTODIAN</code>
+            <button class="copy-btn" data-copy="%LOCALAPPDATA%\CryptCustodian\CRYPTCUSTODIAN">📋</button>
+          </div>
+          <p class="hint-small">Ou chemin complet : <code>C:\Users\<i>TonNom</i>\AppData\Local\CryptCustodian\CRYPTCUSTODIAN\</code></p>
+        </div>
+
+        <div class="tuto-block">
+          <h3>🍎 macOS</h3>
+          <p>Ouvre le <strong>Finder</strong>, puis menu <em>Aller → Aller au dossier…</em> (<kbd>Cmd+Maj+G</kbd>) et tape :</p>
+          <div class="path-copy">
+            <code>~/Library/Application Support/com.gamemaker.cryptcustodian</code>
+            <button class="copy-btn" data-copy="~/Library/Application Support/com.gamemaker.cryptcustodian">📋</button>
+          </div>
+          <p class="hint-small">Le nom du dossier peut varier légèrement (cherche "Crypt" dans <code>~/Library/Application Support/</code>)</p>
+        </div>
+
+        <div class="tuto-block">
+          <h3>🐧 Linux</h3>
+          <p>Ouvre un terminal et navigue vers :</p>
+          <div class="path-copy">
+            <code>~/.config/CryptCustodian/</code>
+            <button class="copy-btn" data-copy="~/.config/CryptCustodian/">📋</button>
+          </div>
+          <p class="hint-small">Sinon essaye <code>~/.local/share/CryptCustodian/</code></p>
+        </div>
+
+        <div class="tuto-block">
+          <h3>🎮 Steam Deck / Proton</h3>
+          <p>Le jeu tourne sous Proton, donc la save est dans le préfixe Wine :</p>
+          <div class="path-copy">
+            <code>~/.steam/steam/steamapps/compatdata/2394650/pfx/drive_c/users/steamuser/AppData/Local/CryptCustodian/CRYPTCUSTODIAN/</code>
+            <button class="copy-btn" data-copy="~/.steam/steam/steamapps/compatdata/2394650/pfx/drive_c/users/steamuser/AppData/Local/CryptCustodian/CRYPTCUSTODIAN/">📋</button>
+          </div>
+          <p class="hint-small">2394650 = Steam App ID de Crypt Custodian</p>
+        </div>
+
+        <div class="tuto-block warn">
+          <h3>⚠️ Important avant d'importer</h3>
+          <ul>
+            <li>L'import est <strong>lecture seule</strong>, ton fichier n'est pas modifié</li>
+            <li>Si tu veux <em>éditer</em> ta save (donner garbage, etc.), utilise <code>edit_save.py</code> sur le repo et <strong>ferme le jeu</strong> d'abord</li>
+            <li>Le fichier à importer est <code>CryptCustodian1.sav</code> (ou 2/3) — pas <code>Settings.sav</code> ni <code>paint1.sav</code></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="data.js"></script>

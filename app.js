@@ -503,6 +503,36 @@ document.getElementById('save-import-btn').addEventListener('click', () => {
   document.getElementById('save-file-input').click();
 });
 
+/* Modal Tuto .sav */
+const tutoModal = document.getElementById('save-tuto-modal');
+document.getElementById('save-tuto-btn').addEventListener('click', () => {
+  tutoModal.classList.remove('hidden');
+});
+document.getElementById('save-tuto-close').addEventListener('click', () => {
+  tutoModal.classList.add('hidden');
+});
+tutoModal.addEventListener('click', (e) => {
+  if (e.target === tutoModal) tutoModal.classList.add('hidden');
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !tutoModal.classList.contains('hidden')) {
+    tutoModal.classList.add('hidden');
+  }
+});
+tutoModal.querySelectorAll('.copy-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const text = btn.dataset.copy;
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = '✓';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = '📋'; btn.classList.remove('copied'); }, 1500);
+    } catch {
+      toast('Copie échouée — sélectionne et copie manuellement');
+    }
+  });
+});
+
 document.getElementById('save-file-input').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
