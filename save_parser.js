@@ -226,7 +226,6 @@
       try {
         const j = JSON.parse(jsonStr);
         if (!j._room) return;
-        // SKIP les stars placées par l'utilisateur (peuvent être n'importe où)
         const sprite = (j._sprite_zoom || '').toLowerCase();
         if (sprite.includes('star')) return;
         (anchors[j._room] = anchors[j._room] || []).push({
@@ -240,11 +239,11 @@
     for (const v of Object.values(hidden || {})) addAnchor(v);
     for (const v of Object.values(visible || {})) addAnchor(v);
 
-    // Fallback : anchors statiques de référence (rooms non-couvertes par la save courante)
+    // Fallback : anchors statiques de référence
     const ref = window.CC_ANCHORS_REFERENCE;
     if (ref) {
       for (const [room, refEntries] of Object.entries(ref)) {
-        if (anchors[room]) continue;  // déjà couvert par la save courante
+        if (anchors[room]) continue;
         for (const e of refEntries) {
           (anchors[room] = anchors[room] || []).push({
             smap_xpos: e.smap_xpos,
@@ -256,6 +255,50 @@
       }
     }
     return anchors;
+  }
+
+  // Fallback zone-level : pour les rooms sans anchor direct, on utilise la
+  // moyenne des anchors d'autres rooms ayant le même préfixe de zone (AS_*,
+  // AT_*, AE_*, etc.). Approximatif mais dans la bonne zone géographique.
+  function buildZoneFallback(anchors) {
+    const zoneStats = {};  // prefix -> { sum_x, sum_y, count }
+    for (const [room, entries] of Object.entries(anchors)) {
+      const prefix = getRoomZonePrefix(room);
+      if (!prefix) continue;
+      const zone = zoneStats[prefix] = zoneStats[prefix] || { sum_x: 0, sum_y: 0, sum_x2: 0, sum_y2: 0, count: 0 };
+      for (const e of entries) {
+        zone.sum_x += e.smap_xpos;
+        zone.sum_y += e.smap_ypos;
+        zone.sum_x2 += e.smap_xpos * e.smap_xpos;
+        zone.sum_y2 += e.smap_ypos * e.smap_ypos;
+        zone.count++;
+      }
+    }
+    // Calcule mean et variance pour chaque zone
+    const out = {};
+    for (const [prefix, z] of Object.entries(zoneStats)) {
+      const meanX = z.sum_x / z.count;
+      const meanY = z.sum_y / z.count;
+      const varX = z.sum_x2 / z.count - meanX * meanX;
+      const varY = z.sum_y2 / z.count - meanY * meanY;
+      out[prefix] = {
+        smap_xpos: meanX,
+        smap_ypos: meanY,
+        // Spread = stddev / 2, utilisé pour cluster les items dans la zone
+        spread_x: Math.sqrt(Math.max(0, varX)) / 2,
+        spread_y: Math.sqrt(Math.max(0, varY)) / 2,
+        count: z.count
+      };
+    }
+    return out;
+  }
+
+  function getRoomZonePrefix(roomName) {
+    if (roomName.startsWith('APalace')) return 'APalace';
+    if (roomName.startsWith('ATheatre')) return 'ATheatre';
+    const m = /^(A[A-Z]?[0-9]?)_/.exec(roomName);
+    if (m) return m[1];
+    return null;
   }
 
   function parseGameInfoFromKey(key, room) {
@@ -296,9 +339,21 @@
       return x >= 0 && x <= 105 && y >= 0 && y <= 60;
     }
 
+    // Pré-calcule le fallback zone-level
+    const zoneFallback = buildZoneFallback(anchors);
+
     for (const room of datamine.rooms) {
-      const roomAnchors = anchors[room.name] || [];
-      if (roomAnchors.length === 0) continue;
+      let roomAnchors = anchors[room.name] || [];
+      let isZoneFallback = false;
+      if (roomAnchors.length === 0) {
+        // Pas d'anchor direct → fallback zone
+        const prefix = getRoomZonePrefix(room.name);
+        const zone = prefix && zoneFallback[prefix];
+        if (!zone) continue;  // ni anchor direct ni zone → skip
+        roomAnchors = [{ smap_xpos: zone.smap_xpos, smap_ypos: zone.smap_ypos,
+                         gameInfo: null, spread_x: zone.spread_x, spread_y: zone.spread_y }];
+        isZoneFallback = true;
+      }
 
       // Pour chaque item, on cherche un match exact d'abord (anchor pour CET item),
       // sinon on utilise un anchor de la room avec un petit décalage radial.
@@ -329,15 +384,17 @@
           smapY = exactMatch.smap_ypos;
           exact = true;
         } else {
-          // Cluster autour du centre de la room. Décalage radial TRÈS petit
-          // (une room sur la s_map fait ~1-2 units, on reste largement dedans).
           smapX = centerSmapX;
           smapY = centerSmapY;
-          if (itemsInRoom.length > 1) {
-            const angle = (i / itemsInRoom.length) * Math.PI * 2;
-            smapX += Math.cos(angle) * 0.15;
-            smapY += Math.sin(angle) * 0.10;
-          }
+          // Si on est en mode fallback zone, on s'étale plus largement pour
+          // couvrir la zone (pas la room individuelle qu'on ne connait pas)
+          const sx = isZoneFallback ? (roomAnchors[0].spread_x || 2) : 0.15;
+          const sy = isZoneFallback ? (roomAnchors[0].spread_y || 1) : 0.10;
+          // Hash deterministe basé sur la room+index pour répartir
+          const hash = (room.name.charCodeAt(0) * 31 + room.name.charCodeAt(room.name.length - 1) * 7 + i) % 360;
+          const angle = (hash / 360) * Math.PI * 2;
+          smapX += Math.cos(angle) * sx;
+          smapY += Math.sin(angle) * sy;
           exact = false;
         }
 
