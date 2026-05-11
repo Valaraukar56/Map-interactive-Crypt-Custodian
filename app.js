@@ -473,7 +473,8 @@ map.on('click', (e) => {
   }
 });
 
-refreshModeUI();
+// refreshModeUI() est appelé plus bas, APRÈS que mapperUI ait été déclaré
+// (sinon TDZ si state.mapperMode était true au chargement)
 
 /* ====================================================================
    ROOM MAPPER — place les rooms du data.win sur la s_map en bulk
@@ -1014,6 +1015,10 @@ window.addEventListener('keydown', (e) => {
 
 /* Démarre le chargement du datamine */
 initDatamine();
+
+/* Maintenant que mapperUI est déclaré, on peut appeler refreshModeUI()
+   (qui peut accéder à mapperUI via updateMapperHint si state.mapperMode est on). */
+refreshModeUI();
 
 /* ---------- Coordinate display ---------- */
 const coordDisplay = L.control({ position: 'bottomleft' });
