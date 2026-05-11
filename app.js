@@ -585,6 +585,19 @@ function renderSaveReport(report) {
       }).join('')}
     </ul>
 
+    <details class="sr-details" open>
+      <summary>🎯 Compteurs additionnels (pour 100%)</summary>
+      <table class="sr-stats">
+        <tr><td>✨ Upgrade points</td><td>${report.stats.upgrade_points}${report.stats.upgrade_points >= 80 ? ' ✓' : ' (wiki dit ≥68)'}</td></tr>
+        <tr><td>🪙 Upgrade points current</td><td>${report.stats.upgrade_points_current} (à dépenser)</td></tr>
+        <tr><td>🪑 Slots upgrade achetés</td><td>${report.stats.bought_slots} / 20 ${report.stats.bought_slots >= 20 ? '✓' : ''}</td></tr>
+        <tr><td>🏷️ Stickers</td><td>${report.stats.stickers}</td></tr>
+        <tr><td>🔑 Keys</td><td>${report.stats.keys}</td></tr>
+        <tr><td>🎬 Movie key</td><td>${report.stats.movie_key}</td></tr>
+        <tr><td>🎞️ Reels</td><td>${report.stats.reels}</td></tr>
+      </table>
+    </details>
+
     <details class="sr-details">
       <summary>🎵 Musiques débloquées (${cats.jukebox.songs.length})</summary>
       <ul class="sr-songs">${cats.jukebox.songs.map(s => `<li>${s}</li>`).join('')}</ul>

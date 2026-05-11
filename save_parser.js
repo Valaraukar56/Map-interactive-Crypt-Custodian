@@ -164,6 +164,11 @@
         gametime:          Math.round(main.gametime || 0),
         garbage:           Math.round(main.garbage || 0),
         stickers:          Math.round(main.stickers || 0),
+        upgrade_points:    Math.round(main.upgrade_points || 0),
+        upgrade_points_current: Math.round(main.upgrade_points_current || 0),
+        keys:              Math.round(main.keys || 0),
+        movie_key:         Math.round(main.movie_key || 0),
+        reels:             Math.round(main.reels || 0),
         current_room:      main.current_room || '?',
         difficulty:        Math.round(main.difficulty || 0)
       },
