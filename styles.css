@@ -194,6 +194,92 @@ body {
   padding: 6px;
 }
 
+/* Mapper room list */
+.mapper-room-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 380px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.mapper-room-list li {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background 0.1s;
+}
+
+.mapper-room-list li:hover { background: var(--bg-elev-2); }
+
+.mapper-room-list li.selected {
+  background: var(--accent-2);
+  color: white;
+}
+
+.mapper-room-list li.mapped {
+  border-left: 3px solid var(--good);
+  padding-left: 5px;
+}
+
+.mapper-room-list li.mapped::after {
+  content: '✓';
+  position: absolute;
+  right: 10px;
+  color: var(--good);
+}
+
+.mapper-room-list li {
+  position: relative;
+}
+
+.mapper-room-name {
+  font-weight: 600;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.mapper-room-content {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.mapper-room-list li.selected .mapper-room-content { color: rgba(255,255,255,0.8); }
+
+/* Room rectangle overlay */
+.room-rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+  fill: rgba(168, 85, 247, 0.12);
+  pointer-events: none;
+}
+
+.room-rect-label {
+  fill: var(--accent);
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 700;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: #000;
+  stroke-width: 2;
+}
+
+.placement-preview {
+  pointer-events: none;
+  stroke: var(--good);
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+  fill: rgba(34, 197, 94, 0.15);
+}
+
 .cat-header {
   font-size: 11px;
   text-transform: uppercase;

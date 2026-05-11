@@ -20,10 +20,13 @@ const state = loadState() || {
   expanded: {},
   adminMode: false,
   collectMode: false,
-  adminCategory: 'picture'
+  mapperMode: false,
+  adminCategory: 'picture',
+  roomMappings: {}        // { roomName: { x, y, w, h } } en coords s_map
 };
-// rétro-compat : ancien state sans collectMode
 if (state.collectMode === undefined) state.collectMode = false;
+if (state.mapperMode === undefined) state.mapperMode = false;
+if (state.roomMappings === undefined) state.roomMappings = {};
 
 function saveState() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -360,14 +363,19 @@ document.getElementById('toggle-all-off').addEventListener('click', () => {
 function refreshModeUI() {
   const adminBtn = document.getElementById('admin-toggle');
   const collectBtn = document.getElementById('collect-toggle');
-  const panel = document.getElementById('admin-panel');
+  const mapperBtn = document.getElementById('mapper-toggle');
+  const adminPanel = document.getElementById('admin-panel');
+  const mapperPanel = document.getElementById('mapper-panel');
   const hint = document.getElementById('admin-hint');
 
   adminBtn.classList.toggle('active', state.adminMode);
   collectBtn.classList.toggle('active', state.collectMode);
+  mapperBtn.classList.toggle('active', state.mapperMode);
 
-  const anyActive = state.adminMode || state.collectMode;
-  panel.classList.toggle('hidden', !anyActive);
+  adminPanel.classList.toggle('hidden', !(state.adminMode || state.collectMode));
+  mapperPanel.classList.toggle('hidden', !state.mapperMode);
+
+  const anyActive = state.adminMode || state.collectMode || state.mapperMode;
   document.body.style.cursor = anyActive ? 'crosshair' : '';
 
   if (state.collectMode) {
@@ -381,13 +389,13 @@ function refreshModeUI() {
       • Clic sur un marqueur → éditer<br />
       • Drag = déplacer · <kbd>Shift</kbd> + clic = supprimer`;
   }
-  // re-render markers car draggable change
+  if (state.mapperMode) updateMapperHint();
   renderMarkers();
 }
 
 document.getElementById('admin-toggle').addEventListener('click', () => {
   state.adminMode = !state.adminMode;
-  if (state.adminMode) state.collectMode = false;
+  if (state.adminMode) { state.collectMode = false; state.mapperMode = false; }
   saveState();
   refreshModeUI();
   toast(state.adminMode ? 'Mode édition activé' : 'Mode édition désactivé');
@@ -395,7 +403,7 @@ document.getElementById('admin-toggle').addEventListener('click', () => {
 
 document.getElementById('collect-toggle').addEventListener('click', () => {
   state.collectMode = !state.collectMode;
-  if (state.collectMode) state.adminMode = false;
+  if (state.collectMode) { state.adminMode = false; state.mapperMode = false; }
   saveState();
   refreshModeUI();
   toast(state.collectMode ? 'Mode collecte activé' : 'Mode collecte désactivé');
@@ -452,6 +460,10 @@ adminSelect.addEventListener('change', () => {
 });
 
 map.on('click', (e) => {
+  if (state.mapperMode) {
+    handleMapperClick(e.latlng);
+    return;
+  }
   if (state.collectMode) {
     addMarkerAt(e.latlng, { found: true, silent: true });
   } else if (state.adminMode) {
@@ -460,6 +472,240 @@ map.on('click', (e) => {
 });
 
 refreshModeUI();
+
+/* ====================================================================
+   ROOM MAPPER — place les rooms du data.win sur la s_map en bulk
+   ==================================================================== */
+
+let datamine = null;          // rooms by name { name, width, height, instances }
+const mapperUI = {
+  selectedRoom: null,         // nom de la room en cours de placement
+  firstClick: null,           // {lat, lng} du 1er coin
+  rectLayer: L.layerGroup().addTo(map),   // overlay des rectangles
+  search: ''
+};
+
+async function initDatamine() {
+  if (!window.CC_DATAMINE) return;
+  datamine = await window.CC_DATAMINE.load();
+  if (datamine) {
+    console.log(`%c[datamine] ${Object.keys(datamine).length} rooms chargees`, 'color:#22d3ee');
+    renderRoomRects();
+    if (state.mapperMode) renderMapperList();
+  }
+}
+
+function renderRoomRects() {
+  mapperUI.rectLayer.clearLayers();
+  for (const [roomName, m] of Object.entries(state.roomMappings)) {
+    const rect = L.rectangle(
+      [[m.y, m.x], [m.y + m.h, m.x + m.w]],
+      { color: '#a855f7', weight: 2, fillOpacity: 0.10, interactive: false }
+    );
+    rect.addTo(mapperUI.rectLayer);
+    // label
+    const label = L.divIcon({
+      className: '',
+      html: `<div style="font-family:monospace;font-size:10px;font-weight:700;color:#a855f7;text-shadow:0 0 3px #000,0 0 3px #000;background:rgba(0,0,0,0.6);padding:1px 4px;border-radius:3px;white-space:nowrap;">${roomName}</div>`,
+      iconSize: [80, 14],
+      iconAnchor: [0, 14]
+    });
+    L.marker([m.y + m.h, m.x], { icon: label, interactive: false }).addTo(mapperUI.rectLayer);
+  }
+}
+
+function renderMapperList() {
+  const status = document.getElementById('mapper-status');
+  const list = document.getElementById('mapper-room-list');
+  if (!datamine) {
+    status.textContent = 'Chargement du datamine…';
+    list.innerHTML = '';
+    return;
+  }
+
+  const rooms = Object.values(datamine)
+    .filter(r => window.CC_DATAMINE.countInteresting(r) > 0)
+    .map(r => ({
+      ...r,
+      summary: window.CC_DATAMINE.summarizeRoom(r),
+      count: window.CC_DATAMINE.countInteresting(r),
+      mapped: !!state.roomMappings[r.name]
+    }))
+    .sort((a, b) => {
+      if (a.mapped !== b.mapped) return a.mapped ? 1 : -1;  // unmapped first
+      return b.count - a.count;
+    });
+
+  const q = mapperUI.search.toLowerCase();
+  const filtered = q
+    ? rooms.filter(r => r.name.toLowerCase().includes(q) || r.summary.toLowerCase().includes(q))
+    : rooms;
+
+  const totalMapped = rooms.filter(r => r.mapped).length;
+  status.textContent = `${totalMapped} / ${rooms.length} rooms mappées (${rooms.length - totalMapped} restantes)`;
+
+  list.innerHTML = filtered.map(r => `
+    <li data-room="${r.name}" class="${r.mapped ? 'mapped' : ''} ${mapperUI.selectedRoom === r.name ? 'selected' : ''}">
+      <span class="mapper-room-name">${r.name}</span>
+      <span class="mapper-room-content">${escapeHtml(r.summary)} · ${r.width}×${r.height}px</span>
+    </li>
+  `).join('');
+
+  for (const li of list.querySelectorAll('li')) {
+    li.addEventListener('click', () => {
+      const name = li.dataset.room;
+      if (mapperUI.selectedRoom === name) {
+        // re-clic = annuler
+        mapperUI.selectedRoom = null;
+        mapperUI.firstClick = null;
+      } else {
+        mapperUI.selectedRoom = name;
+        mapperUI.firstClick = null;
+        if (state.roomMappings[name]) {
+          // déjà placée : centrer dessus
+          const m = state.roomMappings[name];
+          map.flyTo([m.y + m.h / 2, m.x + m.w / 2], Math.max(map.getZoom(), 2), { duration: 0.6 });
+        }
+      }
+      renderMapperList();
+      updateMapperHint();
+    });
+  }
+}
+
+function updateMapperHint() {
+  const hint = document.getElementById('mapper-hint');
+  if (!hint) return;
+  if (!state.mapperMode) return;
+  if (!mapperUI.selectedRoom) {
+    hint.innerHTML = `<strong>🗺️ Room Mapper.</strong><br />Sélectionne une room dans la liste, puis clique <strong>2 fois sur la map</strong> (coin haut-gauche puis bas-droit). Les items s'auto-placent.`;
+  } else if (!mapperUI.firstClick) {
+    hint.innerHTML = `<strong>📍 ${mapperUI.selectedRoom}</strong><br />Clique le <strong>coin haut-gauche</strong> de cette room sur la map. <em>Esc pour annuler.</em>`;
+  } else {
+    hint.innerHTML = `<strong>📍 ${mapperUI.selectedRoom}</strong><br />Clique maintenant le <strong>coin bas-droit</strong>. <em>Esc pour annuler.</em>`;
+  }
+}
+
+function handleMapperClick(latlng) {
+  if (!mapperUI.selectedRoom) {
+    toast('Sélectionne d\'abord une room dans la liste à gauche');
+    return;
+  }
+  if (!mapperUI.firstClick) {
+    mapperUI.firstClick = latlng;
+    updateMapperHint();
+    toast('Coin 1/2 enregistré — clique le coin bas-droit');
+    return;
+  }
+  // 2e clic : on a un rectangle
+  const tlX = Math.min(mapperUI.firstClick.lng, latlng.lng);
+  const tlY = Math.min(mapperUI.firstClick.lat, latlng.lat);
+  const brX = Math.max(mapperUI.firstClick.lng, latlng.lng);
+  const brY = Math.max(mapperUI.firstClick.lat, latlng.lat);
+  const w = brX - tlX;
+  const h = brY - tlY;
+  if (w < 3 || h < 3) {
+    toast('Rectangle trop petit, recommence');
+    mapperUI.firstClick = null;
+    updateMapperHint();
+    return;
+  }
+
+  finalizeRoomMapping(mapperUI.selectedRoom, { x: tlX, y: tlY, w, h });
+  mapperUI.firstClick = null;
+  mapperUI.selectedRoom = null;
+  updateMapperHint();
+}
+
+function finalizeRoomMapping(roomName, rect) {
+  state.roomMappings[roomName] = rect;
+  // Supprime les anciens markers datamined de cette room (re-map)
+  state.markers = state.markers.filter(m => !(m.id && m.id.startsWith(`dm_${roomName}_`)));
+  // Spawn les nouveaux
+  const room = datamine[roomName];
+  if (room) spawnMarkersFromRoom(roomName, room, rect);
+  saveState();
+  renderMarkers();
+  renderSidebar();
+  renderRoomRects();
+  renderMapperList();
+  const n = state.markers.filter(m => m.id && m.id.startsWith(`dm_${roomName}_`)).length;
+  toast(`${roomName} mappée — ${n} item(s) placé(s)`);
+}
+
+function spawnMarkersFromRoom(roomName, room, rect) {
+  // Les coords y de Leaflet vont du bas vers le haut, mais la s_map (comme
+  // toute image) a y=0 en haut. L'imageOverlay avec bounds [[0,0],[H,W]]
+  // place l'image avec y=H en haut et y=0 en bas. Donc lat (Leaflet y)
+  // correspond à (H - imagePixelY). Ici on travaille en coords "image"
+  // pour le rect (TL = haut gauche de l'image), mais on stocke en coords
+  // Leaflet pour rester cohérent avec les autres markers.
+  // → quand on convertit la position d'un item DANS sa room (x, y image)
+  //   on doit aussi inverser le y.
+  for (let i = 0; i < room.instances.length; i++) {
+    const inst = room.instances[i];
+    const meta = window.CC_DATAMINE.categorize(inst.obj);
+    if (!meta) continue;
+    const relX = inst.x / room.width;
+    const relY = inst.y / room.height;
+    const mapX = rect.x + relX * rect.w;
+    const mapY_image = rect.y + (1 - relY) * rect.h;  // inverse Y dans le rect
+    // mais rect.y est déjà en coords Leaflet (du clic), donc... laisse moi reflechir
+    // Les clics sur la map donnent des latlng en coords Leaflet (y up).
+    // Pour 2 clics TL+BR sur une room, rect.y = min(lat1, lat2) = "bas" en Leaflet
+    // rect.h = brY - tlY > 0
+    // Donc rect.y est le BAS de la room en Leaflet (= en bas de l'image visuellement).
+    // Hmm, c'est contre-intuitif. L'utilisateur a cliqué "TL puis BR" sur l'image,
+    // mais en Leaflet le TL de l'image a un Y plus GRAND que le BR.
+    // → firstClick (TL visuel) a un lat plus grand, latlng final (BR) a un lat plus petit
+    // → min(...) donne lat du BR visuel → rect.y = bas visuel
+    // → rect.y + rect.h = haut visuel
+    // Pour un item à relY=0 (haut dans la room), il faut lat = rect.y + rect.h
+    // Pour relY=1 (bas dans la room), il faut lat = rect.y
+    // Donc lat = rect.y + (1 - relY) * rect.h ✓
+    state.markers.push({
+      id: `dm_${roomName}_${i}`,
+      category: meta.cat,
+      name: meta.label,
+      x: mapX,
+      y: mapY_image,
+      notes: `Room ${roomName} · ${inst.obj}`,
+      found: false
+    });
+  }
+}
+
+/* Toggle mode mapper */
+document.getElementById('mapper-toggle').addEventListener('click', () => {
+  state.mapperMode = !state.mapperMode;
+  if (state.mapperMode) {
+    state.adminMode = false;
+    state.collectMode = false;
+  }
+  mapperUI.selectedRoom = null;
+  mapperUI.firstClick = null;
+  saveState();
+  refreshModeUI();
+  if (state.mapperMode) renderMapperList();
+  toast(state.mapperMode ? 'Mode Mapper activé' : 'Mode Mapper désactivé');
+});
+
+document.getElementById('mapper-search').addEventListener('input', (e) => {
+  mapperUI.search = e.target.value;
+  renderMapperList();
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state.mapperMode) {
+    mapperUI.selectedRoom = null;
+    mapperUI.firstClick = null;
+    updateMapperHint();
+    renderMapperList();
+  }
+});
+
+/* Démarre le chargement du datamine */
+initDatamine();
 
 /* ---------- Coordinate display ---------- */
 const coordDisplay = L.control({ position: 'bottomleft' });

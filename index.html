@@ -34,6 +34,7 @@
     <div class="toolbar">
       <button id="collect-toggle" title="Mode collecte : 1 clic = coche un objet trouvé">✓ Collecte</button>
       <button id="admin-toggle" title="Mode édition complète (nommer, déplacer, etc.)">✏️ Édition</button>
+      <button id="mapper-toggle" title="Mapper les rooms du data.win sur la s_map (place les items en bulk)">🗺️ Mapper</button>
     </div>
 
     <div class="toolbar">
@@ -50,6 +51,18 @@
       </label>
     </div>
 
+    <div id="mapper-panel" class="admin-panel hidden">
+      <p class="hint" id="mapper-hint">
+        <strong>🗺️ Room Mapper.</strong><br />
+        Sélectionne une room ci-dessous, puis clique <strong>2 fois sur la map</strong>
+        (coin haut-gauche puis coin bas-droit) pour la délimiter.<br />
+        Tous les items dedans seront placés automatiquement à leur position relative.
+      </p>
+      <input id="mapper-search" type="search" placeholder="Filtrer rooms…" style="margin:6px 0;width:100%;padding:6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;" />
+      <div id="mapper-status" style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">…</div>
+      <ul id="mapper-room-list" class="mapper-room-list"></ul>
+    </div>
+
     <h2 class="cat-header">Catégories</h2>
     <ul id="categories" class="category-list"></ul>
 
@@ -64,6 +77,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="data.js"></script>
+  <script src="datamine.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
