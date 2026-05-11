@@ -447,7 +447,6 @@ document.getElementById('search').addEventListener('input', () => renderMarkers(
 const SAVE_REPORT_KEY = 'cc-save-report-v1';
 
 // Charge le datamine en arrière-plan pour permettre le cross-référencement
-// (identifier les items manquants par position)
 (function loadDatamine() {
   fetch('Export/crypt_custodian_export.json')
     .then(r => r.ok ? r.json() : null)
@@ -457,7 +456,22 @@ const SAVE_REPORT_KEY = 'cc-save-report-v1';
         console.log(`%c[datamine] ${data.rooms.length} rooms chargees`, 'color:#22d3ee');
       }
     })
-    .catch(() => { /* pas grave, le cross-ref sera juste indispo */ });
+    .catch(() => {});
+})();
+
+// Charge la table d'anchors de référence (extraite d'une save couverte).
+// Permet de placer des items même pour des saves "fraîches" sans téléporteurs.
+(function loadAnchors() {
+  fetch('Export/anchors_reference.json')
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (data) {
+        window.CC_ANCHORS_REFERENCE = data;
+        const count = Object.values(data).reduce((s, a) => s + a.length, 0);
+        console.log(`%c[anchors] ${Object.keys(data).length} rooms / ${count} anchors de référence chargés`, 'color:#22d3ee');
+      }
+    })
+    .catch(() => {});
 })();
 
 // Conversion coords save (_xpos/_ypos in-game units) -> pixels s_map.

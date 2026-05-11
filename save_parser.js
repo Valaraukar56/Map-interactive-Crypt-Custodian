@@ -217,24 +217,41 @@
   }
 
   // Construit un index room → anchor pour estimer la position s_map d'items
-  // dans cette room. Sources : teleporters + hidden markers + visible markers.
+  // dans cette room. Sources prioritaires : teleporters + hidden markers de
+  // LA save courante (les plus précis). Fallback : anchors_reference.json
+  // (extrait d'une save couverte, propriétés fixes du jeu = valides pour toutes les saves).
   function buildRoomAnchors(teleporters, hidden, visible) {
-    const anchors = {};  // roomName -> [{ smap_xpos, smap_ypos, game_x?, game_y? }]
-    function addAnchor(jsonStr, isTeleporter) {
+    const anchors = {};
+    function addAnchor(jsonStr) {
       try {
         const j = JSON.parse(jsonStr);
         if (!j._room) return;
         (anchors[j._room] = anchors[j._room] || []).push({
           smap_xpos: j._xpos,
           smap_ypos: j._ypos,
-          // Si c'est un hidden marker pour un item spécifique, _key encode la position game
           gameInfo: parseGameInfoFromKey(j._key, j._room)
         });
       } catch {}
     }
-    for (const v of Object.values(teleporters || {})) addAnchor(v, true);
-    for (const v of Object.values(hidden || {})) addAnchor(v, false);
-    for (const v of Object.values(visible || {})) addAnchor(v, false);
+    for (const v of Object.values(teleporters || {})) addAnchor(v);
+    for (const v of Object.values(hidden || {})) addAnchor(v);
+    for (const v of Object.values(visible || {})) addAnchor(v);
+
+    // Fallback : anchors statiques de référence (rooms non-couvertes par la save courante)
+    const ref = window.CC_ANCHORS_REFERENCE;
+    if (ref) {
+      for (const [room, refEntries] of Object.entries(ref)) {
+        if (anchors[room]) continue;  // déjà couvert par la save courante
+        for (const e of refEntries) {
+          (anchors[room] = anchors[room] || []).push({
+            smap_xpos: e.smap_xpos,
+            smap_ypos: e.smap_ypos,
+            gameInfo: (e.game_x != null) ? { x: e.game_x, y: e.game_y } : null,
+            isFallback: true
+          });
+        }
+      }
+    }
     return anchors;
   }
 
