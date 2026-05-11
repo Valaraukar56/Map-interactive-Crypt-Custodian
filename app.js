@@ -483,7 +483,9 @@ map.on('mousemove', (e) => {
    Au-dessus de 0 on grandit en proportion. */
 function updateMarkerScale() {
   const z = map.getZoom();
-  const scale = Math.max(1, Math.pow(2, z));
+  // En-dessous de zoom 0 on rétrécit légèrement (jusqu'à 60% au max dézoomé)
+  // pour ne pas écraser la map quand on a une vue d'ensemble.
+  const scale = Math.max(0.6, Math.pow(2, z));
   document.documentElement.style.setProperty('--marker-scale', scale.toFixed(3));
 }
 map.on('zoom zoomend', updateMarkerScale);

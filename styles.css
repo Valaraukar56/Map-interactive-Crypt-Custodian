@@ -402,17 +402,19 @@ kbd {
   border: 2px solid rgba(0, 0, 0, 0.6);
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15), 0 2px 6px rgba(0, 0, 0, 0.6);
   cursor: pointer;
-  transform: scale(var(--marker-scale, 1));
+  --kind-mult: 1;
+  transform: scale(calc(var(--marker-scale, 1) * var(--kind-mult)));
   transform-origin: center;
   transition: transform 0.05s linear;
 }
 
 .cc-marker:hover {
-  transform: scale(calc(var(--marker-scale, 1) * 1.18));
+  transform: scale(calc(var(--marker-scale, 1) * var(--kind-mult) * 1.18));
   z-index: 1000;
 }
 
 .cc-marker.found {
+  --kind-mult: 2;
   background: var(--good) !important;
   color: #fff !important;
   border: 2px solid #064e3b;
