@@ -585,6 +585,19 @@ function renderSaveReport(report) {
         .sort((a, b) => (a._room || '').localeCompare(b._room || ''))
         .map(t => `<li><code>${t._room}</code> · map(${t._xpos}, ${t._ypos})</li>`).join('')}</ul>
     </details>` : ''}
+
+    ${report.allItems && report.allItems.length > 0 ? `
+    <div class="sr-actions">
+      <button id="sr-map-all" title="Place tous les items connus avec position s_map estimée">
+        📍 Mapper tous les items (${report.allItems.length})
+      </button>
+      <button id="sr-map-missing" title="Place uniquement les manquants">
+        🚨 Mapper les manquants (${report.allItems.filter(i => !i.found).length})
+      </button>
+      <button id="sr-clear-imported" title="Retire les markers placés depuis la save">
+        🗑 Retirer les markers save
+      </button>
+    </div>` : ''}
   `;
 
   panel.querySelector('.sr-clear').addEventListener('click', () => {
@@ -592,6 +605,16 @@ function renderSaveReport(report) {
     localStorage.removeItem(SAVE_REPORT_KEY);
     panel.classList.add('hidden');
     panel.innerHTML = '';
+  });
+
+  // Boutons d'actions massives
+  panel.querySelector('#sr-map-all')?.addEventListener('click', () => placeItemsFromReport(report, 'all'));
+  panel.querySelector('#sr-map-missing')?.addEventListener('click', () => placeItemsFromReport(report, 'missing'));
+  panel.querySelector('#sr-clear-imported')?.addEventListener('click', () => {
+    const before = state.markers.length;
+    state.markers = state.markers.filter(m => !(m.id && m.id.startsWith('save_')));
+    saveState(); renderMarkers(); renderSidebar();
+    toast(`${before - state.markers.length} markers save retirés`);
   });
 
   // Bouton "voir sur la map" pour chaque item manquant
@@ -608,6 +631,40 @@ function renderSaveReport(report) {
       placeMissingMarker(px.x, px.y, room, `${room} - curse (${gx},${gy})`);
     });
   });
+}
+
+// Place une batch d'items depuis le rapport save sur la map
+function placeItemsFromReport(report, mode = 'all') {
+  if (!report.allItems || report.allItems.length === 0) {
+    toast('Pas de données data.win — recharge la page pour qu\'elle se charge');
+    return;
+  }
+  // Retire les anciens markers save pour éviter les doublons
+  state.markers = state.markers.filter(m => !(m.id && m.id.startsWith('save_')));
+
+  let placed = 0;
+  for (const item of report.allItems) {
+    if (mode === 'missing' && item.found) continue;
+    // Conversion smap units (saveCoords) → pixels s_map
+    const px = saveCoordToSmapPixel(item.smapX, item.smapY);
+    // Leaflet : lat = MAP_HEIGHT - imagePixelY
+    const lat = MAP_HEIGHT - px.y;
+    const lng = px.x;
+    const id = `save_${item.category}_${item.room}_${item.gameX}_${item.gameY}`;
+    state.markers.push({
+      id,
+      category: item.category,
+      name: item.label + (item.found ? ' ✓' : ' (manquant)'),
+      x: lng, y: lat,
+      notes: `Room ${item.room} · ${item.obj} · ${item.gameX},${item.gameY}`,
+      found: item.found
+    });
+    placed++;
+  }
+  saveState();
+  renderMarkers();
+  renderSidebar();
+  toast(`${placed} items placés sur la map`);
 }
 
 // Place un marker rouge "MANQUANT" sur la map et zoom dessus

@@ -139,6 +139,10 @@
     const datamine = window.CC_DATAMINE_DATA;
     const missingByCat = datamine ? identifyMissing(datamine, persistent, hidden) : null;
 
+    // Construit l'index des anchors room -> s_map
+    const anchors = buildRoomAnchors(teleporters, hidden, null);
+    const allItems = datamine ? listAllItems(datamine, persistent, juke, main, anchors) : [];
+
     return {
       categories: {
         pictures:  { found: pics.length,      total: 36, indices: pics },
@@ -169,17 +173,17 @@
       hiddenMarkers: Object.values(hidden)
         .map(v => { try { return JSON.parse(v); } catch { return null; } })
         .filter(Boolean),
-      persistent_keys_count: Object.keys(persistent).length
+      persistent_keys_count: Object.keys(persistent).length,
+      allItems,          // tous les data.win items avec status + smap position estimée
+      roomAnchors: anchors
     };
   }
 
   // Cross-référence data.win avec persistent_vars pour identifier les
-  // collectibles manquants par catégorie. Pour l'instant on couvre les
-  // curses (les seules trackées de manière 100% fiable par position).
+  // collectibles manquants par catégorie.
   function identifyMissing(datamine, persistent, hidden) {
     const out = { curses: [] };
     const pvKeys = new Set(Object.keys(persistent));
-    // Hidden markers indexés par "Room+x+y" pour cross-référence
     const hiddenByRoom = {};
     for (const v of Object.values(hidden)) {
       try {
@@ -195,7 +199,6 @@
         if (inst.obj === 'o_curse') {
           const key = `${room.name}-${inst.x}-${inst.y}`;
           if (!pvKeys.has(key)) {
-            // Curse non cassée. Cherche la position s_map dans hidden markers.
             const hints = hiddenByRoom[room.name] || [];
             const matchHidden = hints.find(h => h._key && h._key.includes(`${inst.x},${inst.y}`));
             out.curses.push({
@@ -211,6 +214,95 @@
       }
     }
     return out;
+  }
+
+  // Construit un index room → anchor pour estimer la position s_map d'items
+  // dans cette room. Sources : teleporters + hidden markers + visible markers.
+  function buildRoomAnchors(teleporters, hidden, visible) {
+    const anchors = {};  // roomName -> [{ smap_xpos, smap_ypos, game_x?, game_y? }]
+    function addAnchor(jsonStr, isTeleporter) {
+      try {
+        const j = JSON.parse(jsonStr);
+        if (!j._room) return;
+        (anchors[j._room] = anchors[j._room] || []).push({
+          smap_xpos: j._xpos,
+          smap_ypos: j._ypos,
+          // Si c'est un hidden marker pour un item spécifique, _key encode la position game
+          gameInfo: parseGameInfoFromKey(j._key, j._room)
+        });
+      } catch {}
+    }
+    for (const v of Object.values(teleporters || {})) addAnchor(v, true);
+    for (const v of Object.values(hidden || {})) addAnchor(v, false);
+    for (const v of Object.values(visible || {})) addAnchor(v, false);
+    return anchors;
+  }
+
+  function parseGameInfoFromKey(key, room) {
+    // Hidden markers: key = "Room+x,y" → on extrait (x, y) en game pixels
+    if (!key || !key.startsWith(room)) return null;
+    const rest = key.slice(room.length);
+    const m = /^(\d+),(\d+)$/.exec(rest);
+    if (!m) return null;
+    return { x: parseInt(m[1], 10), y: parseInt(m[2], 10) };
+  }
+
+  /* Liste TOUS les items connus (data.win) avec status + position s_map estimée.
+     Utilise les anchors pour convertir (room_pixel) -> (s_map unit).
+     Returns: [{ category, room, gameX, gameY, smapX, smapY, found, label }] */
+  function listAllItems(datamine, persistent, jukeMap, main, anchors) {
+    const pvKeys = new Set(Object.keys(persistent));
+    const items = [];
+    // Ratio empirique : 1 game-pixel ≈ 0.0013 s_map units
+    const SCALE = 0.0013;
+
+    const objToCat = {
+      'o_cd':            { cat: 'disc',    label: 'Jukebox Disc' },
+      'o_curse':         { cat: 'curse',   label: 'Curse Skull' },
+      'o_crouton':       { cat: 'picture', label: 'Crouton' },
+      'o_constellation': { cat: 'special', label: 'Special Attack' },
+      'o_special':       { cat: 'special', label: 'Special Attack' },
+      'o_ability':       { cat: 'ability', label: 'Ability' },
+      'o_ability_newareas': { cat: 'ability', label: 'Ability' },
+      'o_saveshrine':    { cat: 'secret',  label: 'Save Shrine' }
+    };
+
+    for (const room of datamine.rooms) {
+      const roomAnchors = anchors[room.name] || [];
+      if (roomAnchors.length === 0) continue;  // skip rooms sans anchor
+
+      // Choisit le meilleur anchor : si y'en a un avec gameInfo, on s'en sert
+      // (positionnement précis). Sinon on prend le 1er disponible.
+      const anchorWithGame = roomAnchors.find(a => a.gameInfo) || roomAnchors[0];
+
+      for (const inst of room.instances) {
+        const meta = objToCat[inst.obj];
+        if (!meta) continue;
+        const key = `${room.name}-${inst.x}-${inst.y}`;
+        const found = pvKeys.has(key);
+
+        // Estime position s_map
+        let smapX = anchorWithGame.smap_xpos;
+        let smapY = anchorWithGame.smap_ypos;
+        if (anchorWithGame.gameInfo) {
+          smapX += (inst.x - anchorWithGame.gameInfo.x) * SCALE;
+          smapY += (inst.y - anchorWithGame.gameInfo.y) * SCALE;
+        }
+
+        items.push({
+          category: meta.cat,
+          label: meta.label,
+          room: room.name,
+          obj: inst.obj,
+          gameX: inst.x,
+          gameY: inst.y,
+          smapX,
+          smapY,
+          found
+        });
+      }
+    }
+    return items;
   }
 
   window.CC_SAVE = { parseSaveFile };
