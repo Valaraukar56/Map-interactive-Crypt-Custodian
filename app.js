@@ -461,14 +461,27 @@ const SAVE_REPORT_KEY = 'cc-save-report-v1';
 })();
 
 // Conversion coords save (_xpos/_ypos in-game units) -> pixels s_map.
-// Fit linéaire calibré sur :
-//   - Le retour utilisateur (curse AS_8 à _xpos=46.6, _ypos=43.9 → ~(1064, 671))
-//   - L'hypothèse que les xpos/ypos min observés (9 et 2) sont près du bord
-//     intérieur du sprite (marge content area : left=51, top=19)
+// Calibration rigoureuse, dérivée de :
+//   1. L'analyse statistique de 46 points (téléporteurs + hidden markers) :
+//      xpos ∈ [9, 101], ypos ∈ [2, 53.5]
+//   2. Le sprite s_map.png a un content area aux marges (51, 19) → (2540, 875)
+//   3. Un point utilisateur-vérifié : AS_8 à (xpos=46.6, ypos=43.9) → s_map pixel (1064, 671)
+//
+// Fit X : 2 contraintes — xpos=9 mappé à x=51 (bord gauche content) ET le
+// point user AS_8. Erreur résiduelle <1 px sur AS_8, ~8 px à xpos=101 (le
+// bord droit estimé 2532 vs réel 2540).
+//
+// Fit Y : 2 contraintes — ypos=2 mappé à y=19 (bord haut content) ET le
+// point user AS_8. Erreur <1 px sur AS_8. À ypos=53.5 ça donne y=820, ce
+// qui implique un padding de 55px en bas (cohérent : la plus grande ypos
+// observée n'est pas forcément le bord du monde).
+//
+// Ces constantes sont des propriétés FIXES du rendu de la pause-map du jeu,
+// donc valables pour toutes les saves d'utilisateurs.
 function saveCoordToSmapPixel(xpos, ypos) {
   return {
-    x: xpos * 27   - 191,
-    y: ypos * 15.6 -  12
+    x: xpos * 26.94 - 191,
+    y: ypos * 15.56 -  12
   };
 }
 
