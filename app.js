@@ -495,15 +495,13 @@ function renderSaveReport(report) {
   panel.classList.remove('hidden');
 
   const cats = report.categories;
+  const trackable = ['pictures', 'upgrades', 'abilities', 'curses', 'spirits', 'jukebox'];
+  let found = 0, total = 0;
+  for (const c of trackable) { found += cats[c].found; total += cats[c].total; }
   // Préfère le % stocké dans la save (= ce que le jeu affiche en pause)
   const pctGlobal = report.stats.percent > 0
     ? Math.round(report.stats.percent * 10) / 10
-    : (() => {
-        const trackable = ['pictures', 'upgrades', 'abilities', 'curses', 'spirits', 'jukebox'];
-        let found = 0, total = 0;
-        for (const c of trackable) { found += cats[c].found; total += cats[c].total; }
-        return total > 0 ? Math.round((found / total) * 100) : 0;
-      })();
+    : (total > 0 ? Math.round((found / total) * 100) : 0);
 
   const catEntries = [
     { key: 'pictures',  icon: '📷', name: 'Pictures',         color: '#fbbf24' },
