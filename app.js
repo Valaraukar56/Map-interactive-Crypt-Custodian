@@ -494,8 +494,12 @@ const mapperUI = {
 
 /* ---------- Lecture des pixels de s_map.png ----------
    On charge l'image dans un canvas off-screen pour pouvoir flood-fill
-   et identifier les rooms automatiquement quand l'utilisateur clique. */
+   et identifier les rooms automatiquement quand l'utilisateur clique.
+   On précalcule aussi un "edgeMask" qui DILATE les bordures blanches
+   d'un pixel pour éviter que le flood-fill ne passe à travers les
+   bordures anti-aliasées entre deux rooms de même couleur. */
 let mapPixelData = null;
+let mapEdgeMask = null;
 (function loadMapPixels() {
   const img = new Image();
   img.onload = () => {
@@ -506,7 +510,8 @@ let mapPixelData = null;
     ctx.drawImage(img, 0, 0);
     try {
       mapPixelData = ctx.getImageData(0, 0, c.width, c.height);
-      console.log(`%c[s_map] pixel data prêt (${c.width}×${c.height})`, 'color:#22d3ee');
+      mapEdgeMask = buildEdgeMask(mapPixelData);
+      console.log(`%c[s_map] pixel data prêt (${c.width}×${c.height}) + edge mask`, 'color:#22d3ee');
     } catch (e) {
       console.warn('[s_map] lecture des pixels échouée :', e.message);
     }
@@ -515,34 +520,75 @@ let mapPixelData = null;
   img.src = MAP_IMAGE;
 })();
 
+function buildEdgeMask(pd) {
+  const { data, width, height } = pd;
+  const total = width * height;
+  const bright = new Uint8Array(total);
+
+  // Passe 1 : marque les pixels "clairs" (bordures + halo anti-aliasing)
+  const BRIGHT_THRESHOLD = 160;  // pixel considéré comme partie de bordure
+  for (let i = 0; i < total; i++) {
+    const pi = i * 4;
+    const r = data[pi], g = data[pi + 1], b = data[pi + 2];
+    // Soit ≥3 channels brillants, soit moyenne très élevée
+    if ((r > BRIGHT_THRESHOLD && g > BRIGHT_THRESHOLD && b > BRIGHT_THRESHOLD)
+        || ((r + g + b) / 3 > 175)) {
+      bright[i] = 1;
+    }
+  }
+
+  // Passe 2 : dilate de 1 pixel dans les 8 directions
+  // → tout pixel adjacent à une bordure devient lui aussi "bloqué"
+  const edge = new Uint8Array(total);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (bright[i]) { edge[i] = 1; continue; }
+      // check 8 voisins
+      let near = false;
+      for (let dy = -1; dy <= 1 && !near; dy++) {
+        for (let dx = -1; dx <= 1 && !near; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+          if (bright[ny * width + nx]) near = true;
+        }
+      }
+      if (near) edge[i] = 1;
+    }
+  }
+  return edge;
+}
+
 /* ---------- Algorithme flood-fill ----------
    Retourne { x, y, w, h, color } (coords pixel s_map, y vers le bas)
    À partir d'un point cliqué, étend tant que la couleur reste proche
    de celle d'origine, en s'arrêtant aux bordures blanches et au
    fond sombre/gris (background entre les zones). */
 function floodFillBounds(pd, sx, sy) {
-  if (!pd) return null;
+  if (!pd || !mapEdgeMask) return null;
   const { data, width, height } = pd;
   if (sx < 0 || sx >= width || sy < 0 || sy >= height) return null;
 
-  const sIdx = (sy * width + sx) * 4;
-  const r0 = data[sIdx], g0 = data[sIdx + 1], b0 = data[sIdx + 2];
-  if (isHardBorder(r0, g0, b0) || isBackground(r0, g0, b0)) return null;
+  // Si on a cliqué sur une bordure ou tout près, on essaie de "snap"
+  // sur le pixel d'intérieur le plus proche dans une petite fenêtre.
+  let { x: ssx, y: ssy } = snapToInterior(sx, sy, 3);
+  if (ssx < 0) return null;
 
-  const sumOrig = r0 + g0 + b0;
+  const sIdx = (ssy * width + ssx) * 4;
+  const r0 = data[sIdx], g0 = data[sIdx + 1], b0 = data[sIdx + 2];
+  if (isBackground(r0, g0, b0)) return null;
+
   const visited = new Uint8Array(width * height);
-  const stack = [sx, sy];
-  let minX = sx, maxX = sx, minY = sy, maxY = sy;
+  const stack = [ssx, ssy];
+  let minX = ssx, maxX = ssx, minY = ssy, maxY = ssy;
   let sumR = 0, sumG = 0, sumB = 0, n = 0;
 
-  // Seuils très stricts pour éviter de baver dans les rooms voisines
-  // de la même zone (qui ont quasi la même couleur, séparées seulement
-  // par des bordures blanches fines + anti-aliasing).
-  const MAX_DIST = 20;          // diff couleur absolue très tight
-  const BRIGHTER_DELTA = 60;    // si pixel beaucoup + brillant que l'origine → bordure
-  const MAX_PIXELS = 8000;      // ~90x90 px max, une room normale fait 20-80px
-  const HARD_W = Math.floor(width / 3);    // si rect plus large que ça → on rejette
-  const HARD_H = Math.floor(height / 3);
+  const MAX_DIST = 35;          // tolérance couleur (légèrement relâchée car edge mask gère les bordures)
+  const MAX_PIXELS = 12000;
+  // Hard caps absolus : une room sur s_map fait au max ~150 px de côté
+  const HARD_W = 180;
+  const HARD_H = 180;
 
   while (stack.length > 0 && n < MAX_PIXELS) {
     const y = stack.pop();
@@ -551,14 +597,13 @@ function floodFillBounds(pd, sx, sy) {
     const i = y * width + x;
     if (visited[i]) continue;
     visited[i] = 1;
+
+    // L'edge mask bloque les bordures (et leur halo anti-aliasing dilaté de 1px)
+    if (mapEdgeMask[i]) continue;
+
     const pi = i * 4;
     const r = data[pi], g = data[pi + 1], b = data[pi + 2];
-
-    if (isHardBorder(r, g, b)) continue;
     if (isBackground(r, g, b)) continue;
-    // bordure relative : pixel notablement plus brillant que l'origine
-    if ((r + g + b) - sumOrig > BRIGHTER_DELTA * 3) continue;
-    // distance couleur absolue
     if (colorDist(r, g, b, r0, g0, b0) > MAX_DIST) continue;
 
     if (x < minX) minX = x;
@@ -573,17 +618,37 @@ function floodFillBounds(pd, sx, sy) {
     stack.push(x, y - 1);
   }
 
-  if (n < 8) return null;
-  const w = maxX - minX + 1, h = maxY - minY + 1;
+  if (n < 6) return null;
+  // Récupère la bordure réelle (on a snap à 1px de l'intérieur, étendons d'1px)
+  const w = maxX - minX + 3, h = maxY - minY + 3;
   if (w > HARD_W || h > HARD_H) {
-    console.warn(`[floodfill] rectangle ${w}x${h} trop grand (limites ${HARD_W}x${HARD_H}), rejeté`);
+    console.warn(`[floodfill] rect ${w}×${h} trop grand (max ${HARD_W}×${HARD_H}), rejeté`);
     return null;
   }
   return {
-    x: minX, y: minY, w, h,
+    x: minX - 1, y: minY - 1, w, h,
     color: { r: Math.round(sumR / n), g: Math.round(sumG / n), b: Math.round(sumB / n) },
     pixelCount: n
   };
+}
+
+// Si l'utilisateur a cliqué pile sur une bordure, on cherche un pixel
+// d'intérieur dans un rayon donné.
+function snapToInterior(sx, sy, radius) {
+  if (!mapEdgeMask) return { x: sx, y: sy };
+  const w = mapPixelData.width;
+  const idx = sy * w + sx;
+  if (!mapEdgeMask[idx]) return { x: sx, y: sy };
+  for (let r = 1; r <= radius; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const nx = sx + dx, ny = sy + dy;
+        if (nx < 0 || nx >= mapPixelData.width || ny < 0 || ny >= mapPixelData.height) continue;
+        if (!mapEdgeMask[ny * w + nx]) return { x: nx, y: ny };
+      }
+    }
+  }
+  return { x: -1, y: -1 };
 }
 
 function isHardBorder(r, g, b) {
@@ -857,8 +922,8 @@ function showRoomPicker(clickLatlng, rect, color) {
   ).addTo(map);
 
   mapperUI.pendingDetection = { rect, color };
+  mapperUI.allCandidates = rankRoomsForColor(color);  // toutes les rooms triées
 
-  const candidates = rankRoomsForColor(color).slice(0, 30);
   const colorHex = `rgb(${color.r},${color.g},${color.b})`;
   const learnedZones = Object.entries(state.zoneColors).length;
 
@@ -868,14 +933,12 @@ function showRoomPicker(clickLatlng, rect, color) {
         <span class="rp-swatch" style="background:${colorHex}"></span>
         <span class="rp-title">Quelle room ?</span>
       </div>
-      <input class="rp-search" placeholder="Filtrer par nom (ex: AE_)…" />
-      <div class="rp-list">
-        ${candidates.map(c => renderCandidate(c)).join('')}
-      </div>
+      <input class="rp-search" placeholder="Filtrer (ex: marla, AE_, crouton)…" />
+      <div class="rp-list" id="rp-list"></div>
       <div class="rp-hint">
         ${learnedZones > 0
-          ? `${learnedZones} zone(s) déjà apprise(s) — tri par proximité de couleur`
-          : 'Aucune zone apprise — placez 1-2 rooms manuellement pour calibrer le filtre'}
+          ? `${learnedZones} zone(s) apprise(s) — top par proximité couleur`
+          : 'Aucune zone apprise — calibre en plaçant 1-2 rooms via la recherche'}
       </div>
     </div>`;
 
@@ -889,7 +952,33 @@ function showRoomPicker(clickLatlng, rect, color) {
 
   mapperUI.pickerPopup = popup;
 
-  setTimeout(() => bindPickerHandlers(), 0);
+  setTimeout(() => {
+    renderPickerList('');
+    bindPickerHandlers();
+  }, 0);
+}
+
+function renderPickerList(query) {
+  const list = document.getElementById('rp-list');
+  if (!list) return;
+  const all = mapperUI.allCandidates || [];
+  const q = query.toLowerCase();
+  const filtered = q
+    ? all.filter(c => c.name.toLowerCase().includes(q) || c.summary.toLowerCase().includes(q))
+    : all.slice(0, 40);
+  list.innerHTML = filtered.length
+    ? filtered.slice(0, 80).map(c => renderCandidate(c)).join('')
+    : '<div style="padding:12px;text-align:center;color:var(--text-dim);font-size:11px;">Aucune room ne correspond</div>';
+
+  for (const el of list.querySelectorAll('.rp-item')) {
+    el.addEventListener('click', () => {
+      const roomName = el.dataset.room;
+      const det = mapperUI.pendingDetection;
+      if (!det) return;
+      finalizeRoomMapping(roomName, det.rect, det.color);
+      closePickerPopup();
+    });
+  }
 }
 
 function renderCandidate(c) {
@@ -907,27 +996,9 @@ function renderCandidate(c) {
 function bindPickerHandlers() {
   const root = document.querySelector('.room-picker');
   if (!root) return;
-
   const search = root.querySelector('.rp-search');
   search.focus();
-  search.addEventListener('input', () => {
-    const q = search.value.toLowerCase();
-    root.querySelectorAll('.rp-item').forEach(el => {
-      const name = el.dataset.room.toLowerCase();
-      const meta = el.textContent.toLowerCase();
-      el.style.display = (name.includes(q) || meta.includes(q)) ? '' : 'none';
-    });
-  });
-
-  root.querySelectorAll('.rp-item').forEach(el => {
-    el.addEventListener('click', () => {
-      const roomName = el.dataset.room;
-      const det = mapperUI.pendingDetection;
-      if (!det) return;
-      finalizeRoomMapping(roomName, det.rect, det.color);
-      closePickerPopup();
-    });
-  });
+  search.addEventListener('input', () => renderPickerList(search.value));
 }
 
 function closePickerPopup() {
