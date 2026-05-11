@@ -672,21 +672,24 @@ function placeItemsFromReport(report, mode = 'all') {
   // Retire les anciens markers save pour éviter les doublons
   state.markers = state.markers.filter(m => !(m.id && m.id.startsWith('save_')));
 
-  let placed = 0;
+  let placed = 0, skipped = 0;
   for (const item of report.allItems) {
     if (mode === 'missing' && item.found) continue;
-    // Conversion smap units (saveCoords) → pixels s_map
     const px = saveCoordToSmapPixel(item.smapX, item.smapY);
-    // Leaflet : lat = MAP_HEIGHT - imagePixelY
+    // Clamp aux bornes de la s_map (sécurité finale)
+    if (px.x < 0 || px.x > MAP_WIDTH || px.y < 0 || px.y > MAP_HEIGHT) {
+      skipped++;
+      continue;  // skip plutôt que d'afficher en dehors
+    }
     const lat = MAP_HEIGHT - px.y;
     const lng = px.x;
     const id = `save_${item.category}_${item.room}_${item.gameX}_${item.gameY}`;
     state.markers.push({
       id,
       category: item.category,
-      name: item.label + (item.found ? ' ✓' : ' (manquant)'),
+      name: item.label + (item.found ? ' ✓' : ' (manquant)') + (item.exact ? ' 📍' : ''),
       x: lng, y: lat,
-      notes: `Room ${item.room} · ${item.obj} · ${item.gameX},${item.gameY}`,
+      notes: `Room ${item.room} · ${item.obj} · ${item.gameX},${item.gameY}${item.exact ? '\nPosition EXACTE (hidden marker)' : '\nPosition approximative (cluster de la room)'}`,
       found: item.found
     });
     placed++;
@@ -694,7 +697,10 @@ function placeItemsFromReport(report, mode = 'all') {
   saveState();
   renderMarkers();
   renderSidebar();
-  toast(`${placed} items placés sur la map`);
+  const msg = skipped > 0
+    ? `${placed} items placés, ${skipped} skipped (hors map)`
+    : `${placed} items placés sur la map`;
+  toast(msg);
 }
 
 // Place un marker rouge "MANQUANT" sur la map et zoom dessus

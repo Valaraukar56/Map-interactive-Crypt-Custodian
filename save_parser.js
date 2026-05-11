@@ -265,13 +265,17 @@
   }
 
   /* Liste TOUS les items connus (data.win) avec status + position s_map estimée.
-     Utilise les anchors pour convertir (room_pixel) -> (s_map unit).
-     Returns: [{ category, room, gameX, gameY, smapX, smapY, found, label }] */
+     Stratégie de placement (du plus précis au moins précis) :
+       1. Match exact : un anchor existe avec game_x/game_y == position de l'item
+          (cas des hidden markers pour CET item précis) → position exacte
+       2. Anchor même room : placer à la position smap de l'anchor de la room
+          (cluster mais zone correcte). Les items multiples dans une room
+          reçoivent un petit offset radial pour ne pas se superposer.
+       3. Pas d'anchor : item skipé (pas plaçable)
+     Returns: [{ category, room, gameX, gameY, smapX, smapY, found, label, exact }] */
   function listAllItems(datamine, persistent, jukeMap, main, anchors) {
     const pvKeys = new Set(Object.keys(persistent));
     const items = [];
-    // Ratio empirique : 1 game-pixel ≈ 0.0013 s_map units
-    const SCALE = 0.0013;
 
     const objToCat = {
       'o_cd':            { cat: 'disc',    label: 'Jukebox Disc' },
@@ -284,26 +288,61 @@
       'o_saveshrine':    { cat: 'secret',  label: 'Save Shrine' }
     };
 
+    // Bornes valides en coords save (basées sur observations)
+    function inBounds(x, y) {
+      return x >= 0 && x <= 105 && y >= 0 && y <= 60;
+    }
+
     for (const room of datamine.rooms) {
       const roomAnchors = anchors[room.name] || [];
-      if (roomAnchors.length === 0) continue;  // skip rooms sans anchor
+      if (roomAnchors.length === 0) continue;
 
-      // Choisit le meilleur anchor : si y'en a un avec gameInfo, on s'en sert
-      // (positionnement précis). Sinon on prend le 1er disponible.
-      const anchorWithGame = roomAnchors.find(a => a.gameInfo) || roomAnchors[0];
-
+      // Pour chaque item, on cherche un match exact d'abord (anchor pour CET item),
+      // sinon on utilise un anchor de la room avec un petit décalage radial.
+      const itemsInRoom = [];
       for (const inst of room.instances) {
         const meta = objToCat[inst.obj];
         if (!meta) continue;
+        itemsInRoom.push({ inst, meta });
+      }
+      if (itemsInRoom.length === 0) continue;
+
+      // Calcule l'anchor "centre de la room" (moyenne des anchors)
+      const centerSmapX = roomAnchors.reduce((s, a) => s + a.smap_xpos, 0) / roomAnchors.length;
+      const centerSmapY = roomAnchors.reduce((s, a) => s + a.smap_ypos, 0) / roomAnchors.length;
+
+      for (let i = 0; i < itemsInRoom.length; i++) {
+        const { inst, meta } = itemsInRoom[i];
         const key = `${room.name}-${inst.x}-${inst.y}`;
         const found = pvKeys.has(key);
 
-        // Estime position s_map
-        let smapX = anchorWithGame.smap_xpos;
-        let smapY = anchorWithGame.smap_ypos;
-        if (anchorWithGame.gameInfo) {
-          smapX += (inst.x - anchorWithGame.gameInfo.x) * SCALE;
-          smapY += (inst.y - anchorWithGame.gameInfo.y) * SCALE;
+        // Cherche un match EXACT : anchor dont gameInfo == position de cet item
+        const exactMatch = roomAnchors.find(a =>
+          a.gameInfo && a.gameInfo.x === inst.x && a.gameInfo.y === inst.y);
+
+        let smapX, smapY, exact;
+        if (exactMatch) {
+          smapX = exactMatch.smap_xpos;
+          smapY = exactMatch.smap_ypos;
+          exact = true;
+        } else {
+          // Cluster autour du centre de la room, avec petit décalage radial
+          // pour ne pas superposer les items multiples
+          smapX = centerSmapX;
+          smapY = centerSmapY;
+          if (itemsInRoom.length > 1) {
+            const angle = (i / itemsInRoom.length) * Math.PI * 2;
+            smapX += Math.cos(angle) * 0.6;
+            smapY += Math.sin(angle) * 0.4;
+          }
+          exact = false;
+        }
+
+        // Clamp aux bornes pour éviter les placements hors-map
+        if (!inBounds(smapX, smapY)) {
+          // Soit on skip, soit on clamp. On clamp.
+          smapX = Math.max(0, Math.min(105, smapX));
+          smapY = Math.max(0, Math.min(60, smapY));
         }
 
         items.push({
@@ -315,7 +354,8 @@
           gameY: inst.y,
           smapX,
           smapY,
-          found
+          found,
+          exact
         });
       }
     }
