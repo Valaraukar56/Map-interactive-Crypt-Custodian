@@ -673,13 +673,18 @@ function placeItemsFromReport(report, mode = 'all') {
   state.markers = state.markers.filter(m => !(m.id && m.id.startsWith('save_')));
 
   let placed = 0, skipped = 0;
+  // Zone "contenu" de la s_map (en dehors c'est du gris = padding inutile)
+  // marges sprite : Left=51, Right=2540, Top=19, Bottom=875
+  const CONTENT_MIN_X = 30, CONTENT_MAX_X = 2560;
+  const CONTENT_MIN_Y = 10, CONTENT_MAX_Y = 850;
   for (const item of report.allItems) {
     if (mode === 'missing' && item.found) continue;
     const px = saveCoordToSmapPixel(item.smapX, item.smapY);
-    // Clamp aux bornes de la s_map (sécurité finale)
-    if (px.x < 0 || px.x > MAP_WIDTH || px.y < 0 || px.y > MAP_HEIGHT) {
+    // Skip si hors zone de contenu de la s_map (= dans le padding = invisible)
+    if (px.x < CONTENT_MIN_X || px.x > CONTENT_MAX_X ||
+        px.y < CONTENT_MIN_Y || px.y > CONTENT_MAX_Y) {
       skipped++;
-      continue;  // skip plutôt que d'afficher en dehors
+      continue;
     }
     const lat = MAP_HEIGHT - px.y;
     const lng = px.x;
