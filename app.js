@@ -446,6 +446,29 @@ document.getElementById('search').addEventListener('input', () => renderMarkers(
    ==================================================================== */
 const SAVE_REPORT_KEY = 'cc-save-report-v1';
 
+// Charge le datamine en arrière-plan pour permettre le cross-référencement
+// (identifier les items manquants par position)
+(function loadDatamine() {
+  fetch('Export/crypt_custodian_export.json')
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (data) {
+        window.CC_DATAMINE_DATA = data;
+        console.log(`%c[datamine] ${data.rooms.length} rooms chargees`, 'color:#22d3ee');
+      }
+    })
+    .catch(() => { /* pas grave, le cross-ref sera juste indispo */ });
+})();
+
+// Conversion approximative coords save (_xpos/_ypos in-game units) -> pixels s_map
+// Basée sur l'analyse des téléporteurs : x range 0-101 -> 0-2580, y range 0-54 -> 0-880
+function saveCoordToSmapPixel(xpos, ypos) {
+  return {
+    x: xpos * 25.6,
+    y: ypos * 16.3
+  };
+}
+
 document.getElementById('save-import-btn').addEventListener('click', () => {
   document.getElementById('save-file-input').click();
 });
@@ -472,14 +495,15 @@ function renderSaveReport(report) {
   panel.classList.remove('hidden');
 
   const cats = report.categories;
-  // Total et pourcentage global (basé sur les catégories trackables)
-  const trackable = ['pictures', 'upgrades', 'abilities', 'curses', 'spirits', 'jukebox'];
-  let found = 0, total = 0;
-  for (const c of trackable) {
-    found += cats[c].found;
-    total += cats[c].total;
-  }
-  const pctGlobal = total > 0 ? Math.round((found / total) * 100) : 0;
+  // Préfère le % stocké dans la save (= ce que le jeu affiche en pause)
+  const pctGlobal = report.stats.percent > 0
+    ? Math.round(report.stats.percent * 10) / 10
+    : (() => {
+        const trackable = ['pictures', 'upgrades', 'abilities', 'curses', 'spirits', 'jukebox'];
+        let found = 0, total = 0;
+        for (const c of trackable) { found += cats[c].found; total += cats[c].total; }
+        return total > 0 ? Math.round((found / total) * 100) : 0;
+      })();
 
   const catEntries = [
     { key: 'pictures',  icon: '📷', name: 'Pictures',         color: '#fbbf24' },
@@ -507,6 +531,8 @@ function renderSaveReport(report) {
         const pct = c.total > 0 ? Math.round(c.found / c.total * 100) : 0;
         const remaining = c.total - c.found;
         const done = remaining <= 0;
+        // Pour curses, on peut potentiellement nommer les manquants
+        const hasMissingList = ce.key === 'curses' && c.missing && c.missing.length > 0;
         return `
           <li class="sr-cat ${done ? 'done' : 'pending'}">
             <div class="sr-cat-row">
@@ -516,6 +542,16 @@ function renderSaveReport(report) {
               <span class="sr-cat-status">${done ? '✓' : `manque ${remaining}`}</span>
             </div>
             <div class="sr-cat-bar"><div class="sr-cat-fill" style="width:${pct}%; background:${ce.color}"></div></div>
+            ${hasMissingList ? `
+              <div class="sr-cat-missing">
+                ${c.missing.map(m => `
+                  <div class="sr-missing-item" data-room="${m.room}" data-x="${m.x}" data-y="${m.y}"
+                       data-smap-x="${m.smap_xpos || ''}" data-smap-y="${m.smap_ypos || ''}">
+                    <span>📍 <strong>${m.room}</strong> · pos (${m.x}, ${m.y})</span>
+                    ${m.smap_xpos != null ? `<button class="sr-show-btn" title="Place un marker sur la map">→ Voir sur la map</button>` : ''}
+                  </div>
+                `).join('')}
+              </div>` : ''}
           </li>
         `;
       }).join('')}
@@ -531,11 +567,15 @@ function renderSaveReport(report) {
       <table class="sr-stats">
         <tr><td>Ennemis tués</td><td>${report.stats.enemies_killed.toLocaleString()}</td></tr>
         <tr><td>Coups portés</td><td>${report.stats.attacks_swung.toLocaleString()}</td></tr>
+        <tr><td>Morts</td><td>${report.stats.times_died}</td></tr>
         <tr><td>Specials utilisés</td><td>${report.stats.specials_used}</td></tr>
         <tr><td>Attack strength</td><td>${report.stats.attack_strength}</td></tr>
         <tr><td>Health max</td><td>${report.stats.player_health_max}</td></tr>
-        <tr><td>Slots upgrade</td><td>${report.stats.bought_slots}</td></tr>
-        <tr><td>Room actuelle</td><td>${report.stats.current_room}</td></tr>
+        <tr><td>Slots upgrade achetés</td><td>${report.stats.bought_slots}</td></tr>
+        <tr><td>Garbage (currency)</td><td>${report.stats.garbage.toLocaleString()}</td></tr>
+        <tr><td>Stickers posés</td><td>${report.stats.stickers}</td></tr>
+        <tr><td>Temps de jeu</td><td>${formatGametime(report.stats.gametime)}</td></tr>
+        <tr><td>Room actuelle</td><td><code>${report.stats.current_room}</code></td></tr>
         <tr><td>Difficulté</td><td>${report.stats.difficulty}</td></tr>
       </table>
     </details>
@@ -555,6 +595,49 @@ function renderSaveReport(report) {
     panel.classList.add('hidden');
     panel.innerHTML = '';
   });
+
+  // Bouton "voir sur la map" pour chaque item manquant
+  panel.querySelectorAll('.sr-show-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = btn.closest('.sr-missing-item');
+      const sx = parseFloat(item.dataset.smapX);
+      const sy = parseFloat(item.dataset.smapY);
+      const room = item.dataset.room;
+      const gx = item.dataset.x, gy = item.dataset.y;
+      if (!sx || !sy) { toast('Position s_map inconnue'); return; }
+      const px = saveCoordToSmapPixel(sx, sy);
+      placeMissingMarker(px.x, px.y, room, `${room} - curse (${gx},${gy})`);
+    });
+  });
+}
+
+// Place un marker rouge "MANQUANT" sur la map et zoom dessus
+function placeMissingMarker(smapPxX, smapPxY, roomName, notes) {
+  // En Leaflet : lat = MAP_HEIGHT - imagePixelY (image y top->down vs leaflet y bottom->up)
+  const lat = MAP_HEIGHT - smapPxY;
+  const lng = smapPxX;
+  const id = `missing_${roomName}_${Date.now()}`;
+  state.markers.push({
+    id, category: 'curse', name: `🚨 MANQUE : ${roomName}`,
+    x: lng, y: lat, notes, found: false
+  });
+  saveState();
+  renderMarkers();
+  renderSidebar();
+  map.flyTo([lat, lng], 3, { duration: 0.8 });
+  toast(`Marker placé pour ${roomName} — voir la map`);
+}
+
+// Format gametime (game ticks → human-readable)
+function formatGametime(ticks) {
+  // Hypothese : 60 ticks/sec
+  const secs = Math.floor(ticks / 60);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m ${s}s`;
 }
 
 // Restaure le rapport sauvegardé au chargement

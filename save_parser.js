@@ -111,7 +111,11 @@
     const persistent = persData ? parsePersistent(persData) : {};
     const teleporters = teleData ? parseTyped(teleData) : {};
 
-    return buildReport(main, juke, persistent, teleporters);
+    // Hidden map markers (peuvent contenir des indices sur curses non-cassées)
+    const hiddenData = top['_map_mark_hidden_wrapper'] ? hexDecode(ASCII.decode(top['_map_mark_hidden_wrapper'])) : null;
+    const hidden = hiddenData ? parseTyped(hiddenData) : {};
+
+    return buildReport(main, juke, persistent, teleporters, hidden);
   }
 
   // Compte les indices N tels que prefix+N == valueRequired
@@ -125,37 +129,88 @@
     return out.sort((a, b) => a - b);
   }
 
-  function buildReport(main, juke, persistent, teleporters) {
+  function buildReport(main, juke, persistent, teleporters, hidden) {
     const pics = countIndices(main, 'pics');
     const upgrades = countIndices(main, 'upgrade_list');
     const upgradesActive = countIndices(main, 'upgrade_list_active');
     const abilities = countIndices(main, 'ability_list');
+
+    // Croise avec data.win si disponible pour identifier les manquants précis
+    const datamine = window.CC_DATAMINE_DATA;
+    const missingByCat = datamine ? identifyMissing(datamine, persistent, hidden) : null;
 
     return {
       categories: {
         pictures:  { found: pics.length,      total: 36, indices: pics },
         upgrades:  { found: upgrades.length,  total: 32, indices: upgrades, equipped: upgradesActive.length },
         abilities: { found: abilities.length, total: 8,  indices: abilities },
-        curses:    { found: Math.round(main.curses_beat || 0), total: 10 },
+        curses:    { found: Math.round(main.curses_beat || 0), total: 10, missing: missingByCat?.curses || [] },
         spirits:   { found: Math.round(main.catghosts || 0),   total: 20 },
         jukebox:   { found: Object.keys(juke).length,          total: 20, songs: Object.keys(juke).sort() }
       },
       stats: {
+        percent:           main.percent || 0,
         enemies_killed:    Math.round(main.enemies_killed || 0),
         attacks_swung:     Math.round(main.attacks_swung || 0),
         specials_used:     Math.round(main.specials_used || 0),
         attack_strength:   main.attack_strength || 0,
         player_health_max: main.player_health_max || 0,
         bought_slots:      Math.round(main.bought_slots || 0),
+        times_died:        Math.round(main.times_died || 0),
+        gametime:          Math.round(main.gametime || 0),
+        garbage:           Math.round(main.garbage || 0),
+        stickers:          Math.round(main.stickers || 0),
         current_room:      main.current_room || '?',
         difficulty:        Math.round(main.difficulty || 0)
       },
       teleporters: Object.values(teleporters)
         .map(v => { try { return JSON.parse(v); } catch { return null; } })
         .filter(Boolean),
-      persistent_keys_count: Object.keys(persistent).length,
-      persistent: persistent
+      hiddenMarkers: Object.values(hidden)
+        .map(v => { try { return JSON.parse(v); } catch { return null; } })
+        .filter(Boolean),
+      persistent_keys_count: Object.keys(persistent).length
     };
+  }
+
+  // Cross-référence data.win avec persistent_vars pour identifier les
+  // collectibles manquants par catégorie. Pour l'instant on couvre les
+  // curses (les seules trackées de manière 100% fiable par position).
+  function identifyMissing(datamine, persistent, hidden) {
+    const out = { curses: [] };
+    const pvKeys = new Set(Object.keys(persistent));
+    // Hidden markers indexés par "Room+x+y" pour cross-référence
+    const hiddenByRoom = {};
+    for (const v of Object.values(hidden)) {
+      try {
+        const h = JSON.parse(v);
+        if (h._room) {
+          (hiddenByRoom[h._room] = hiddenByRoom[h._room] || []).push(h);
+        }
+      } catch {}
+    }
+
+    for (const room of datamine.rooms) {
+      for (const inst of room.instances) {
+        if (inst.obj === 'o_curse') {
+          const key = `${room.name}-${inst.x}-${inst.y}`;
+          if (!pvKeys.has(key)) {
+            // Curse non cassée. Cherche la position s_map dans hidden markers.
+            const hints = hiddenByRoom[room.name] || [];
+            const matchHidden = hints.find(h => h._key && h._key.includes(`${inst.x},${inst.y}`));
+            out.curses.push({
+              room: room.name,
+              x: inst.x,
+              y: inst.y,
+              key,
+              smap_xpos: matchHidden?._xpos,
+              smap_ypos: matchHidden?._ypos
+            });
+          }
+        }
+      }
+    }
+    return out;
   }
 
   window.CC_SAVE = { parseSaveFile };
