@@ -462,16 +462,103 @@ adminSelect.addEventListener('change', () => {
 });
 
 map.on('click', (e) => {
-  if (state.mapperMode) {
-    handleMapperClick(e.latlng);
-    return;
-  }
+  // En mode mapper, les clics sont ignorés — c'est le drag qui définit le rectangle.
+  if (state.mapperMode) return;
   if (state.collectMode) {
     addMarkerAt(e.latlng, { found: true, silent: true });
   } else if (state.adminMode) {
     addMarkerAt(e.latlng, { found: false, silent: false });
   }
 });
+
+/* Drag-to-select en mode Mapper : on désactive le pan de Leaflet
+   pendant le drag, on dessine un rectangle live, et au relâchement
+   on ouvre le picker (ou on map direct si une room est pré-sélectionnée). */
+let dragState = null;
+map.on('mousedown', (e) => {
+  if (!state.mapperMode) return;
+  if (e.originalEvent.button !== 0) return;  // gauche seulement
+  // Désactive le pan
+  map.dragging.disable();
+  map.boxZoom.disable();
+  dragState = {
+    start: e.latlng,
+    rectLayer: null
+  };
+  L.DomEvent.stopPropagation(e);
+});
+
+map.on('mousemove', (e) => {
+  if (!dragState) return;
+  const a = dragState.start, b = e.latlng;
+  const bounds = [
+    [Math.min(a.lat, b.lat), Math.min(a.lng, b.lng)],
+    [Math.max(a.lat, b.lat), Math.max(a.lng, b.lng)]
+  ];
+  if (dragState.rectLayer) {
+    dragState.rectLayer.setBounds(bounds);
+  } else {
+    dragState.rectLayer = L.rectangle(bounds, {
+      color: '#22c55e', weight: 2, fillOpacity: 0.18, dashArray: '4 4', interactive: false
+    }).addTo(map);
+  }
+});
+
+map.on('mouseup', (e) => {
+  if (!dragState) return;
+  const a = dragState.start, b = e.latlng;
+  const rect = {
+    x: Math.min(a.lng, b.lng),
+    y: Math.min(a.lat, b.lat),
+    w: Math.abs(b.lng - a.lng),
+    h: Math.abs(b.lat - a.lat)
+  };
+  if (dragState.rectLayer) map.removeLayer(dragState.rectLayer);
+  dragState = null;
+  map.dragging.enable();
+  map.boxZoom.enable();
+
+  // Trop petit = clic simple par erreur → ignore
+  if (rect.w < 3 || rect.h < 3) return;
+
+  // Sample la couleur au centre du rectangle pour le filtrage par zone
+  const cx = Math.round(rect.x + rect.w / 2);
+  const cy = Math.round(MAP_HEIGHT - (rect.y + rect.h / 2));
+  const color = sampleColorAt(cx, cy);
+
+  if (mapperUI.selectedRoom) {
+    finalizeRoomMapping(mapperUI.selectedRoom, rect, color);
+    mapperUI.selectedRoom = null;
+    updateMapperHint();
+  } else {
+    const center = L.latLng(rect.y + rect.h / 2, rect.x + rect.w / 2);
+    showRoomPicker(center, rect, color);
+  }
+});
+
+function sampleColorAt(px, py) {
+  if (!mapPixelData) return { r: 128, g: 128, b: 128 };
+  const w = mapPixelData.width, h = mapPixelData.height;
+  if (px < 0 || px >= w || py < 0 || py >= h) return { r: 128, g: 128, b: 128 };
+  // Moyenne sur une petite fenêtre 5x5 autour du point
+  let sumR = 0, sumG = 0, sumB = 0, n = 0;
+  for (let dy = -2; dy <= 2; dy++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      const x = px + dx, y = py + dy;
+      if (x < 0 || x >= w || y < 0 || y >= h) continue;
+      const i = (y * w + x) * 4;
+      sumR += mapPixelData.data[i];
+      sumG += mapPixelData.data[i + 1];
+      sumB += mapPixelData.data[i + 2];
+      n++;
+    }
+  }
+  return {
+    r: Math.round(sumR / n),
+    g: Math.round(sumG / n),
+    b: Math.round(sumB / n)
+  };
+}
 
 // refreshModeUI() est appelé plus bas, APRÈS que mapperUI ait été déclaré
 // (sinon TDZ si state.mapperMode était true au chargement)
@@ -829,24 +916,14 @@ function updateMapperHint() {
   if (!hint) return;
   if (!state.mapperMode) return;
 
-  if (mapperUI.useAutoDetect) {
-    if (mapperUI.selectedRoom) {
-      hint.innerHTML = `<strong>📍 ${mapperUI.selectedRoom}</strong> sélectionnée.<br />
-        Clique <strong>une fois</strong> à l'intérieur de la room sur la map → les bornes seront détectées auto. <em>Esc pour annuler.</em>`;
-    } else {
-      const learned = Object.keys(state.zoneColors).length;
-      hint.innerHTML = `<strong>🗺️ Mapper (auto).</strong><br />
-        Clique <strong>une fois à l'intérieur</strong> d'une room sur la s_map → un popup te propose les rooms candidates filtrées par couleur de zone.<br />
-        ${learned > 0 ? `${learned} zone(s) apprises — filtre actif.` : 'Place 1-2 rooms pour calibrer le filtre couleur.'}`;
-    }
+  const learned = Object.keys(state.zoneColors).length;
+  if (mapperUI.selectedRoom) {
+    hint.innerHTML = `<strong>📍 ${mapperUI.selectedRoom}</strong> sélectionnée.<br />
+      <strong>Drag</strong> (clic-glisser) sur la map pour entourer la room. <em>Esc pour annuler.</em>`;
   } else {
-    if (!mapperUI.selectedRoom) {
-      hint.innerHTML = `<strong>🗺️ Mode 2-clic.</strong><br />Sélectionne une room dans la liste, puis clique <strong>2 fois sur la map</strong> (TL puis BR).`;
-    } else if (!mapperUI.firstClick) {
-      hint.innerHTML = `<strong>📍 ${mapperUI.selectedRoom}</strong> — clique le <strong>coin haut-gauche</strong>. <em>Esc pour annuler.</em>`;
-    } else {
-      hint.innerHTML = `<strong>📍 ${mapperUI.selectedRoom}</strong> — clique maintenant le <strong>coin bas-droit</strong>. <em>Esc pour annuler.</em>`;
-    }
+    hint.innerHTML = `<strong>🗺️ Mapper.</strong><br />
+      <strong>Clic-glisser</strong> sur la map pour entourer une room → un popup te propose les noms candidats.<br />
+      ${learned > 0 ? `${learned} zone(s) apprises — filtre couleur actif dans le popup.` : 'Place 1-2 rooms pour calibrer le filtre couleur.'}`;
   }
 }
 
