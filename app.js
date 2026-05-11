@@ -22,11 +22,13 @@ const state = loadState() || {
   collectMode: false,
   mapperMode: false,
   adminCategory: 'picture',
-  roomMappings: {}        // { roomName: { x, y, w, h } } en coords s_map
+  roomMappings: {},       // { roomName: { x, y, w, h } } en coords s_map (Leaflet)
+  zoneColors: {}          // { zonePrefix: { r, g, b } } appris au fil des placements
 };
 if (state.collectMode === undefined) state.collectMode = false;
 if (state.mapperMode === undefined) state.mapperMode = false;
 if (state.roomMappings === undefined) state.roomMappings = {};
+if (state.zoneColors === undefined) state.zoneColors = {};
 
 function saveState() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -479,11 +481,178 @@ refreshModeUI();
 
 let datamine = null;          // rooms by name { name, width, height, instances }
 const mapperUI = {
-  selectedRoom: null,         // nom de la room en cours de placement
-  firstClick: null,           // {lat, lng} du 1er coin
+  selectedRoom: null,         // nom de la room en cours de placement (mode 2-clic)
+  firstClick: null,           // {lat, lng} du 1er coin (mode 2-clic)
   rectLayer: L.layerGroup().addTo(map),   // overlay des rectangles
-  search: ''
+  search: '',
+  pendingDetection: null,     // { rect, color } quand un picker est ouvert
+  pendingRect: null,          // Leaflet rectangle temporaire pour visualiser
+  pickerPopup: null,          // L.popup ouvert
+  useAutoDetect: true         // toggle "1 clic + auto" vs 2-clic manuel
 };
+
+/* ---------- Lecture des pixels de s_map.png ----------
+   On charge l'image dans un canvas off-screen pour pouvoir flood-fill
+   et identifier les rooms automatiquement quand l'utilisateur clique. */
+let mapPixelData = null;
+(function loadMapPixels() {
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    try {
+      mapPixelData = ctx.getImageData(0, 0, c.width, c.height);
+      console.log(`%c[s_map] pixel data prêt (${c.width}×${c.height})`, 'color:#22d3ee');
+    } catch (e) {
+      console.warn('[s_map] lecture des pixels échouée :', e.message);
+    }
+  };
+  img.onerror = () => console.warn('[s_map] image introuvable');
+  img.src = MAP_IMAGE;
+})();
+
+/* ---------- Algorithme flood-fill ----------
+   Retourne { x, y, w, h, color } (coords pixel s_map, y vers le bas)
+   À partir d'un point cliqué, étend tant que la couleur reste proche
+   de celle d'origine, en s'arrêtant aux bordures blanches et au
+   fond sombre/gris (background entre les zones). */
+function floodFillBounds(pd, sx, sy) {
+  if (!pd) return null;
+  const { data, width, height } = pd;
+  if (sx < 0 || sx >= width || sy < 0 || sy >= height) return null;
+
+  const sIdx = (sy * width + sx) * 4;
+  const r0 = data[sIdx], g0 = data[sIdx + 1], b0 = data[sIdx + 2];
+  if (isBorder(r0, g0, b0) || isBackground(r0, g0, b0)) return null;
+
+  const visited = new Uint8Array(width * height);
+  const stack = [sx, sy];
+  let minX = sx, maxX = sx, minY = sy, maxY = sy;
+  let sumR = 0, sumG = 0, sumB = 0, n = 0;
+  const MAX_DIST = 70;
+  const MAX_PIXELS = 30000;  // safety
+
+  while (stack.length > 0 && n < MAX_PIXELS) {
+    const y = stack.pop();
+    const x = stack.pop();
+    if (x < 0 || x >= width || y < 0 || y >= height) continue;
+    const i = y * width + x;
+    if (visited[i]) continue;
+    visited[i] = 1;
+    const pi = i * 4;
+    const r = data[pi], g = data[pi + 1], b = data[pi + 2];
+    if (isBorder(r, g, b) || isBackground(r, g, b)) continue;
+    if (colorDist(r, g, b, r0, g0, b0) > MAX_DIST) continue;
+
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    sumR += r; sumG += g; sumB += b; n++;
+
+    stack.push(x + 1, y);
+    stack.push(x - 1, y);
+    stack.push(x, y + 1);
+    stack.push(x, y - 1);
+  }
+
+  if (n < 8) return null;
+  return {
+    x: minX, y: minY,
+    w: maxX - minX + 1, h: maxY - minY + 1,
+    color: { r: Math.round(sumR / n), g: Math.round(sumG / n), b: Math.round(sumB / n) },
+    pixelCount: n
+  };
+}
+
+function isBorder(r, g, b) {
+  // Bordures blanches entre les rooms (et le tour de chaque room)
+  return r > 200 && g > 200 && b > 200;
+}
+function isBackground(r, g, b) {
+  // Background gris-très-sombre entre les zones colorées
+  if (r < 60 && g < 60 && b < 60) return true;
+  // Gris uniforme (R≈G≈B avec saturation faible)
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  if (max < 120 && (max - min) < 15) return true;
+  return false;
+}
+function colorDist(r1, g1, b1, r2, g2, b2) {
+  return Math.abs(r1 - r2) + Math.abs(g1 - g2) + Math.abs(b1 - b2);
+}
+
+/* Conversion latlng Leaflet ↔ pixel de l'image s_map.
+   Leaflet : lat=0 en bas, lat=H en haut, lng=0 à gauche, lng=W à droite.
+   Image   : pixelY=0 en haut.                                          */
+function latlngToPixel(latlng) {
+  return { x: Math.round(latlng.lng), y: Math.round(MAP_HEIGHT - latlng.lat) };
+}
+function pixelToLatlng(px, py) {
+  return L.latLng(MAP_HEIGHT - py, px);
+}
+function pixelRectToLeafletRect(pr) {
+  // pr en coords pixel image (y vers le bas) -> rect en coords Leaflet (y vers le haut)
+  return {
+    x: pr.x,
+    y: MAP_HEIGHT - (pr.y + pr.h),
+    w: pr.w,
+    h: pr.h
+  };
+}
+
+/* Helpers zones */
+function getZonePrefix(roomName) {
+  if (roomName.startsWith('APalace')) return 'APalace';
+  if (roomName.startsWith('ATheatre')) return 'ATheatre';
+  const m = /^([A-Z]\d?|A1)_/.exec(roomName);
+  return m ? m[1] : null;
+}
+
+function rankRoomsForColor(detectedColor) {
+  if (!datamine) return [];
+  const all = Object.values(datamine).filter(r => window.CC_DATAMINE.countInteresting(r) > 0);
+
+  // Pour chaque zone, on a peut-être une couleur apprise
+  return all.map(r => {
+    const prefix = getZonePrefix(r.name);
+    const learned = prefix ? state.zoneColors[prefix] : null;
+    const score = learned
+      ? colorDist(learned.r, learned.g, learned.b, detectedColor.r, detectedColor.g, detectedColor.b)
+      : 500;  // pas appris → score moyen, mais affiché en fallback
+    return {
+      ...r,
+      prefix,
+      score,
+      summary: window.CC_DATAMINE.summarizeRoom(r),
+      count: window.CC_DATAMINE.countInteresting(r),
+      mapped: !!state.roomMappings[r.name],
+      learnedColor: learned
+    };
+  }).sort((a, b) => {
+    if (a.mapped !== b.mapped) return a.mapped ? 1 : -1;
+    return a.score - b.score;
+  });
+}
+
+function learnZoneColor(roomName, color) {
+  const prefix = getZonePrefix(roomName);
+  if (!prefix) return;
+  // Moyenne progressive : si on a déjà une couleur apprise pour cette zone,
+  // on fait la moyenne avec la nouvelle (pour lisser).
+  const prev = state.zoneColors[prefix];
+  if (prev) {
+    state.zoneColors[prefix] = {
+      r: Math.round((prev.r + color.r) / 2),
+      g: Math.round((prev.g + color.g) / 2),
+      b: Math.round((prev.b + color.b) / 2)
+    };
+  } else {
+    state.zoneColors[prefix] = { ...color };
+  }
+}
 
 async function initDatamine() {
   if (!window.CC_DATAMINE) return;
@@ -577,16 +746,41 @@ function updateMapperHint() {
   const hint = document.getElementById('mapper-hint');
   if (!hint) return;
   if (!state.mapperMode) return;
-  if (!mapperUI.selectedRoom) {
-    hint.innerHTML = `<strong>🗺️ Room Mapper.</strong><br />Sélectionne une room dans la liste, puis clique <strong>2 fois sur la map</strong> (coin haut-gauche puis bas-droit). Les items s'auto-placent.`;
-  } else if (!mapperUI.firstClick) {
-    hint.innerHTML = `<strong>📍 ${mapperUI.selectedRoom}</strong><br />Clique le <strong>coin haut-gauche</strong> de cette room sur la map. <em>Esc pour annuler.</em>`;
+
+  if (mapperUI.useAutoDetect) {
+    if (mapperUI.selectedRoom) {
+      hint.innerHTML = `<strong>📍 ${mapperUI.selectedRoom}</strong> sélectionnée.<br />
+        Clique <strong>une fois</strong> à l'intérieur de la room sur la map → les bornes seront détectées auto. <em>Esc pour annuler.</em>`;
+    } else {
+      const learned = Object.keys(state.zoneColors).length;
+      hint.innerHTML = `<strong>🗺️ Mapper (auto).</strong><br />
+        Clique <strong>une fois à l'intérieur</strong> d'une room sur la s_map → un popup te propose les rooms candidates filtrées par couleur de zone.<br />
+        ${learned > 0 ? `${learned} zone(s) apprises — filtre actif.` : 'Place 1-2 rooms pour calibrer le filtre couleur.'}`;
+    }
   } else {
-    hint.innerHTML = `<strong>📍 ${mapperUI.selectedRoom}</strong><br />Clique maintenant le <strong>coin bas-droit</strong>. <em>Esc pour annuler.</em>`;
+    if (!mapperUI.selectedRoom) {
+      hint.innerHTML = `<strong>🗺️ Mode 2-clic.</strong><br />Sélectionne une room dans la liste, puis clique <strong>2 fois sur la map</strong> (TL puis BR).`;
+    } else if (!mapperUI.firstClick) {
+      hint.innerHTML = `<strong>📍 ${mapperUI.selectedRoom}</strong> — clique le <strong>coin haut-gauche</strong>. <em>Esc pour annuler.</em>`;
+    } else {
+      hint.innerHTML = `<strong>📍 ${mapperUI.selectedRoom}</strong> — clique maintenant le <strong>coin bas-droit</strong>. <em>Esc pour annuler.</em>`;
+    }
   }
 }
 
 function handleMapperClick(latlng) {
+  // Mode auto-détection (par défaut) : 1 clic dans une room → détection auto
+  if (mapperUI.useAutoDetect) {
+    if (mapperUI.selectedRoom) {
+      // Si une room est pré-sélectionnée depuis la liste, on l'utilise direct
+      autoDetectAndMap(latlng, mapperUI.selectedRoom);
+    } else {
+      autoDetectAndMap(latlng, null);
+    }
+    return;
+  }
+
+  // Mode 2-clic manuel (fallback)
   if (!mapperUI.selectedRoom) {
     toast('Sélectionne d\'abord une room dans la liste à gauche');
     return;
@@ -597,31 +791,144 @@ function handleMapperClick(latlng) {
     toast('Coin 1/2 enregistré — clique le coin bas-droit');
     return;
   }
-  // 2e clic : on a un rectangle
   const tlX = Math.min(mapperUI.firstClick.lng, latlng.lng);
   const tlY = Math.min(mapperUI.firstClick.lat, latlng.lat);
   const brX = Math.max(mapperUI.firstClick.lng, latlng.lng);
   const brY = Math.max(mapperUI.firstClick.lat, latlng.lat);
-  const w = brX - tlX;
-  const h = brY - tlY;
+  const w = brX - tlX, h = brY - tlY;
   if (w < 3 || h < 3) {
     toast('Rectangle trop petit, recommence');
     mapperUI.firstClick = null;
     updateMapperHint();
     return;
   }
-
   finalizeRoomMapping(mapperUI.selectedRoom, { x: tlX, y: tlY, w, h });
   mapperUI.firstClick = null;
   mapperUI.selectedRoom = null;
   updateMapperHint();
 }
 
-function finalizeRoomMapping(roomName, rect) {
+function autoDetectAndMap(latlng, preselectedRoom) {
+  const px = latlngToPixel(latlng);
+  const detected = floodFillBounds(mapPixelData, px.x, px.y);
+  if (!detected) {
+    toast('Clic en dehors d\'une room. Vise l\'intérieur d\'un rectangle coloré.');
+    return;
+  }
+
+  const rect = pixelRectToLeafletRect(detected);
+
+  // Si une room est déjà pré-sélectionnée → on map direct
+  if (preselectedRoom) {
+    finalizeRoomMapping(preselectedRoom, rect, detected.color);
+    mapperUI.selectedRoom = null;
+    updateMapperHint();
+    return;
+  }
+
+  // Sinon → on ouvre le picker à côté du clic
+  showRoomPicker(latlng, rect, detected.color);
+}
+
+function showRoomPicker(clickLatlng, rect, color) {
+  closePickerPopup();
+
+  // Visualiser le rectangle détecté
+  mapperUI.pendingRect = L.rectangle(
+    [[rect.y, rect.x], [rect.y + rect.h, rect.x + rect.w]],
+    { color: '#22c55e', weight: 2, fillOpacity: 0.18, dashArray: '4 4', interactive: false }
+  ).addTo(map);
+
+  mapperUI.pendingDetection = { rect, color };
+
+  const candidates = rankRoomsForColor(color).slice(0, 30);
+  const colorHex = `rgb(${color.r},${color.g},${color.b})`;
+  const learnedZones = Object.entries(state.zoneColors).length;
+
+  const html = `
+    <div class="room-picker">
+      <div class="rp-head">
+        <span class="rp-swatch" style="background:${colorHex}"></span>
+        <span class="rp-title">Quelle room ?</span>
+      </div>
+      <input class="rp-search" placeholder="Filtrer par nom (ex: AE_)…" />
+      <div class="rp-list">
+        ${candidates.map(c => renderCandidate(c)).join('')}
+      </div>
+      <div class="rp-hint">
+        ${learnedZones > 0
+          ? `${learnedZones} zone(s) déjà apprise(s) — tri par proximité de couleur`
+          : 'Aucune zone apprise — placez 1-2 rooms manuellement pour calibrer le filtre'}
+      </div>
+    </div>`;
+
+  const popup = L.popup({
+    maxWidth: 360, minWidth: 280, autoClose: false, closeOnClick: false,
+    className: 'room-picker-popup'
+  })
+    .setLatLng(clickLatlng)
+    .setContent(html)
+    .openOn(map);
+
+  mapperUI.pickerPopup = popup;
+
+  setTimeout(() => bindPickerHandlers(), 0);
+}
+
+function renderCandidate(c) {
+  const colorTag = c.learnedColor
+    ? `<span class="rp-color-tag" style="background:rgb(${c.learnedColor.r},${c.learnedColor.g},${c.learnedColor.b})"></span>`
+    : '<span class="rp-color-tag" style="background:#444"></span>';
+  return `<div class="rp-item ${c.mapped ? 'mapped' : ''}" data-room="${c.name}">
+    ${colorTag}
+    <span class="rp-name">${c.name}</span>
+    <span class="rp-meta">${escapeHtml(c.summary)}</span>
+    ${c.mapped ? '<span class="rp-tag">déjà ✓</span>' : ''}
+  </div>`;
+}
+
+function bindPickerHandlers() {
+  const root = document.querySelector('.room-picker');
+  if (!root) return;
+
+  const search = root.querySelector('.rp-search');
+  search.focus();
+  search.addEventListener('input', () => {
+    const q = search.value.toLowerCase();
+    root.querySelectorAll('.rp-item').forEach(el => {
+      const name = el.dataset.room.toLowerCase();
+      const meta = el.textContent.toLowerCase();
+      el.style.display = (name.includes(q) || meta.includes(q)) ? '' : 'none';
+    });
+  });
+
+  root.querySelectorAll('.rp-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const roomName = el.dataset.room;
+      const det = mapperUI.pendingDetection;
+      if (!det) return;
+      finalizeRoomMapping(roomName, det.rect, det.color);
+      closePickerPopup();
+    });
+  });
+}
+
+function closePickerPopup() {
+  if (mapperUI.pendingRect) {
+    map.removeLayer(mapperUI.pendingRect);
+    mapperUI.pendingRect = null;
+  }
+  if (mapperUI.pickerPopup) {
+    map.closePopup(mapperUI.pickerPopup);
+    mapperUI.pickerPopup = null;
+  }
+  mapperUI.pendingDetection = null;
+}
+
+function finalizeRoomMapping(roomName, rect, detectedColor) {
   state.roomMappings[roomName] = rect;
-  // Supprime les anciens markers datamined de cette room (re-map)
+  if (detectedColor) learnZoneColor(roomName, detectedColor);
   state.markers = state.markers.filter(m => !(m.id && m.id.startsWith(`dm_${roomName}_`)));
-  // Spawn les nouveaux
   const room = datamine[roomName];
   if (room) spawnMarkersFromRoom(roomName, room, rect);
   saveState();
@@ -697,6 +1004,7 @@ document.getElementById('mapper-search').addEventListener('input', (e) => {
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && state.mapperMode) {
+    closePickerPopup();
     mapperUI.selectedRoom = null;
     mapperUI.firstClick = null;
     updateMapperHint();
