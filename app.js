@@ -460,12 +460,15 @@ const SAVE_REPORT_KEY = 'cc-save-report-v1';
     .catch(() => { /* pas grave, le cross-ref sera juste indispo */ });
 })();
 
-// Conversion approximative coords save (_xpos/_ypos in-game units) -> pixels s_map
-// Basée sur l'analyse des téléporteurs : x range 0-101 -> 0-2580, y range 0-54 -> 0-880
+// Conversion coords save (_xpos/_ypos in-game units) -> pixels s_map.
+// Fit linéaire calibré sur :
+//   - Le retour utilisateur (curse AS_8 à _xpos=46.6, _ypos=43.9 → ~(1064, 671))
+//   - L'hypothèse que les xpos/ypos min observés (9 et 2) sont près du bord
+//     intérieur du sprite (marge content area : left=51, top=19)
 function saveCoordToSmapPixel(xpos, ypos) {
   return {
-    x: xpos * 25.6,
-    y: ypos * 16.3
+    x: xpos * 27   - 191,
+    y: ypos * 15.6 -  12
   };
 }
 
